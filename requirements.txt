@@ -1,0 +1,6 @@
+fastf1
+dash
+pandas
+plotly
+matplotlib
+openpyxl
