@@ -1,0 +1,3 @@
+- Fisrt you need to run this command: pip install -r requirements.txt
+- Then you can start **app.py** and in the console there will be a localhost url, from which you can access the diagrams.
+- All data credit to: https://docs.fastf1.dev/#
