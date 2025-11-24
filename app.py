@@ -1,6 +1,7 @@
 import dash
 from dash import dcc, html, no_update
 from dash.dependencies import Input, Output, State, MATCH, ALL
+import dash_bootstrap_components as dbc
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
@@ -112,58 +113,55 @@ def get_options(years):
     team_options = [{'label': t, 'value': t} for t in sorted(list(teams_set))]
     driver_options = [{'label': driver_labels.get(d, d), 'value': d} for d in sorted(list(drivers_set))]
             
-    return all_race_options, driver_options, team_options# Kezdeti adatok (2022)
-DEFAULT_YEAR = 2022
+    return all_race_options, driver_options, team_options
+# Kezdeti adatok (2021)
+DEFAULT_YEAR = 2021
 init_race_options, init_driver_options, init_team_options = get_options([DEFAULT_YEAR])
 
-# Alkalmazás inicializálása
-app = dash.Dash(__name__)
+# Alkalmazás inicializálása (Bootstrap theme for modern look)
+external_stylesheets = [dbc.themes.CYBORG]
+app = dash.Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
+server = app.server
 
 app.layout = html.Div([
-    # Header / Control Bar
-    html.Div([
-        html.H1("F1 Szezon Elemző", style={'margin': '0', 'fontSize': '24px', 'fontWeight': '600'}),
-        html.Div([
-            html.Div([
-                html.Label("Év:", style={'marginRight': '10px', 'color': '#fff'}),
-                dcc.Dropdown(
-                    id='year-selector',
-                    options=[{'label': str(y), 'value': y} for y in range(2021, 2025)],
-                    value=[DEFAULT_YEAR],
-                    multi=True,
-                    clearable=False,
-                    style={'width': '200px', 'color': '#000', 'marginRight': '20px'}
-                ),
-            ], style={'display': 'flex', 'alignItems': 'center'}),
-            html.Div([
-                html.Label("Felső sorban:", style={'marginRight': '10px', 'color': '#fff'}),
-                dcc.Dropdown(
-                    id='layout-selector',
-                    options=[
-                        {'label': 'Gumistratégiák', 'value': 'tire'},
-                        {'label': 'Kvalifikáció', 'value': 'qual'},
-                        {'label': 'Verseny', 'value': 'race'},
-                        {'label': 'Bajnokság', 'value': 'champ'},
-                        {'label': 'Pozíció Változás', 'value': 'gain'},
-                        {'label': 'Köridők', 'value': 'lap'}
-                    ],
-                    value=['tire', 'qual'],
-                    multi=True,
-                    clearable=False,
-                    style={'width': '300px', 'color': '#000'}
-                )
-            ], style={'display': 'flex', 'alignItems': 'center', 'marginRight': '20px'}),
-            html.Button("Nézet váltása", id='btn-layout-toggle', n_clicks=0, className='btn-modern')
-        ], style={'display': 'flex', 'alignItems': 'center'})
-    ], style={
-        'display': 'flex', 
-        'justifyContent': 'space-between', 
-        'alignItems': 'center', 
-        'padding': '20px 40px', 
-        'backgroundColor': '#252526', 
-        'borderBottom': '1px solid #333',
-        'marginBottom': '30px'
-    }),
+    # Navbar / Control Bar (modern Bootstrap look)
+    dbc.Navbar(
+        dbc.Container([
+            dbc.Row([
+                dbc.Col(html.Div(dbc.NavbarBrand("F1 Szezon Elemző", className="ms-2")), width="auto"),
+                dbc.Col(html.Div([
+                    html.Label("Év:", style={'marginRight': '8px', 'color': 'var(--bs-body-color)', 'marginBottom': '0'}),
+                    dcc.Dropdown(
+                        id='year-selector',
+                        options=[{'label': str(y), 'value': y} for y in range(2021, 2025)],
+                        value=[DEFAULT_YEAR],
+                        multi=True,
+                        clearable=False,
+                        style={'width': '220px'}
+                    ),
+                ]), width="auto", align="center"),
+                dbc.Col(html.Div([
+                    html.Label("Felső sorban:", style={'marginRight': '8px', 'color': 'var(--bs-body-color)', 'marginBottom': '0'}),
+                    dcc.Dropdown(
+                        id='layout-selector',
+                        options=[
+                            {'label': 'Gumistratégiák', 'value': 'tire'},
+                            {'label': 'Kvalifikáció', 'value': 'qual'},
+                            {'label': 'Verseny', 'value': 'race'},
+                            {'label': 'Bajnokság', 'value': 'champ'},
+                            {'label': 'Pozíció Változás', 'value': 'gain'},
+                            {'label': 'Köridők', 'value': 'lap'}
+                        ],
+                        value=['tire'],
+                        multi=True,
+                        clearable=False,
+                        style={'width': '320px'}
+                    )
+                ]), width="auto", align="center"),
+                dbc.Col(dbc.Button("Nézet váltása", id='btn-layout-toggle', n_clicks=0, color='primary'), width="auto", align="center"),
+            ], align="center", className="g-2"),
+        ]), color="dark", dark=True, className="mb-3"
+    ),
 
     html.Div(id='graphs-container', style={'display': 'flex', 'flexDirection': 'column', 'padding': '0 20px'}, children=[
         
@@ -1051,6 +1049,7 @@ def update_gain_loss_graph(selected_drivers, selected_races, selected_teams, yea
         barmode='group',
         title="Pozíció Nyereség/Veszteség (Rajthely vs. Befutó)",
         hover_data=hover_data
+        ,template=None
     )
     
     fig.update_yaxes(title="Pozíció Változás (+ Javított, - Rontott)")
