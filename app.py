@@ -6,7 +6,6 @@ import plotly.graph_objects as go
 import pandas as pd
 import os
 import fastf1
-import fastf1.plotting
 
 # Cache beállítása - engedélyezve, a hiányzó munkamenetek letöltése és cache-elése folytatható
 if not os.path.exists('cache'):
