@@ -1,4 +1,4 @@
-import gradio as gr
+import panel as pn
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
@@ -7,6 +7,9 @@ import fastf1
 import fastf1.plotting
 from functools import lru_cache
 
+# Initialize Panel extension with Plotly and specific design template
+pn.extension('plotly', design='material', theme='dark')
+
 # --- Globális Beállítások és Adatkezelő Függvények ---
 
 # Cache beállítása - engedélyezve
@@ -14,13 +17,50 @@ if not os.path.exists('cache'):
     os.makedirs('cache')
 fastf1.Cache.enable_cache('cache')
 
-
 # Globális cache az adatoknak
 DATA_CACHE = {}
 SCHEDULE_CACHE = {}
 
 # Default year for selectors
 DEFAULT_YEAR = 2022
+
+# Circuit Coordinates (Approximate)
+CIRCUIT_LOCATIONS = {
+    'Sakhir': (26.0325, 50.5106),
+    'Jeddah': (21.6319, 39.1044),
+    'Melbourne': (-37.8497, 144.968),
+    'Baku': (40.3725, 49.8533),
+    'Miami': (25.958, -80.2389),
+    'Imola': (44.3439, 11.7167),
+    'Monaco': (43.7347, 7.4206),
+    'Barcelona': (41.57, 2.2611),
+    'Montréal': (45.5017, -73.5673),
+    'Montreal': (45.5017, -73.5673),
+    'Spielberg': (47.2197, 14.7647),
+    'Silverstone': (52.0786, -1.0169),
+    'Budapest': (47.583, 19.250),
+    'Spa-Francorchamps': (50.4372, 5.9714),
+    'Zandvoort': (52.3888, 4.5409),
+    'Monza': (45.6156, 9.2811),
+    'Singapore': (1.2914, 103.864),
+    'Suzuka': (34.8431, 136.541),
+    'Lusail': (25.4888, 51.4542),
+    'Austin': (30.1328, -97.6411),
+    'Mexico City': (19.4042, -99.0907),
+    'São Paulo': (-23.7036, -46.6997),
+    'Sao Paulo': (-23.7036, -46.6997),
+    'Las Vegas': (36.1147, -115.173),
+    'Yas Island': (24.4672, 54.6031),
+    'Abu Dhabi': (24.4672, 54.6031),
+    'Shanghai': (31.3389, 121.22),
+    'Portimão': (37.227, -8.628),
+    'Istanbul': (40.9517, 29.405),
+    'Le Castellet': (43.2506, 5.7917),
+    'Sochi': (43.4056, 39.9578),
+    'Nürburg': (50.3356, 6.9475),
+    'Mugello': (43.9975, 11.3719),
+    'Doha': (25.4888, 51.4542)
+}
 
 def get_data(year):
     if year is None:
@@ -73,7 +113,7 @@ def get_options(years):
     if not isinstance(years, list):
         years = [years]
     
-    all_race_options = []
+    all_race_options = {} # Changed to dict for Panel {label: value}
     drivers_set = set()
     teams_set = set()
     driver_labels = {}
@@ -85,7 +125,7 @@ def get_options(years):
             for _, row in schedule.iterrows():
                 label = f"{year} Round {row['RoundNumber']}: {row['EventName']}"
                 value = f"{year}_{row['RoundNumber']}"
-                all_race_options.append({'label': label, 'value': value})
+                all_race_options[label] = value
         
         # Drivers & Teams
         _, df_results = get_data(year)
@@ -114,33 +154,20 @@ def get_options(years):
                 pass
 
     # Sort and format
-    team_options = [t for t in sorted(list(teams_set))]
-    # Gradiohoz a race_values/labels a legtisztább, ha nem használunk custom components-et
-    driver_options_list_of_dict = [{'label': driver_labels.get(d, d), 'value': d} for d in sorted(list(drivers_set))]
-    driver_values = [d['value'] for d in driver_options_list_of_dict]
+    team_options = sorted(list(teams_set))
+    # Driver options as dict {label: value}
+    driver_options = {driver_labels.get(d, d): d for d in sorted(list(drivers_set))}
             
-    return all_race_options, driver_values, team_options
-
-# Kezdeti adatok
-DEFAULT_YEAR = 2022
-INIT_RACE_OPTIONS, INIT_DRIVER_OPTIONS, INIT_TEAM_OPTIONS = get_options([DEFAULT_YEAR])
-INIT_RACE_VALUES = [r['value'] for r in INIT_RACE_OPTIONS]
-
+    return all_race_options, driver_options, team_options
 
 # --- Grafikonokat Generáló Függvények ---
 
-def extract_race_params(race_value_list):
-    params = []
-    for r_val in race_value_list:
-        try:
-            year, round_number = map(int, str(r_val).split('_'))
-            params.append((year, round_number))
-        except ValueError:
-            continue
-    return params
-
 def create_tire_graph(race_value, year_selector_value):
     """Létrehozza a gumistratégia Plotly ábrát."""
+    # Handle list input from CheckBoxGroup (take first selected)
+    if isinstance(race_value, list):
+        race_value = race_value[0] if race_value else None
+
     if not race_value:
         return go.Figure().update_layout(title="Válassz egy futamot!", template='plotly_dark')
     
@@ -150,6 +177,7 @@ def create_tire_graph(race_value, year_selector_value):
         return go.Figure().update_layout(title="Érvénytelen futam kiválasztás.", template='plotly_dark')
 
     df_all_data, df_results = get_data(year)
+
     
     if df_all_data.empty:
          return go.Figure().update_layout(title="Nincs elérhető adat ehhez az évhez.", template='plotly_dark')
@@ -161,14 +189,56 @@ def create_tire_graph(race_value, year_selector_value):
             
     event_name = df_stints['EventName'].iloc[0]
             
-    df_stints['DriverShort'] = (
-        df_stints['Driver'].astype(str)
-        .str.split()
-        .str[-1]
-        .str[:3]
-        .str.upper()
-        .fillna(df_stints['Driver'].astype(str).str[:3].str.upper())
-    )
+    # Map Driver to Abbreviation if possible
+    driver_map = {}
+    if not df_results.empty:
+        df_r = df_results[df_results['RoundNumber'] == round_number].copy()
+        
+        # Helper to normalize numbers (handle 44.0 vs 44 vs "44")
+        def normalize_key(x):
+            try:
+                return str(int(float(x)))
+            except (ValueError, TypeError):
+                return str(x).strip()
+
+        if 'Abbreviation' in df_r.columns:
+            # Map from Number (Standard FastF1 name)
+            if 'Number' in df_r.columns:
+                keys = df_r['Number'].apply(normalize_key)
+                driver_map.update(dict(zip(keys, df_r['Abbreviation'])))
+            
+            # Map from DriverNumber (Alternative name seen in Excel)
+            if 'DriverNumber' in df_r.columns:
+                keys = df_r['DriverNumber'].apply(normalize_key)
+                driver_map.update(dict(zip(keys, df_r['Abbreviation'])))
+
+            # Map from Driver Name (just in case)
+            if 'Driver' in df_r.columns:
+                driver_map.update(dict(zip(df_r['Driver'].astype(str), df_r['Abbreviation'])))
+
+
+    # Apply mapping
+    # Normalize the stint driver identifiers too
+    def normalize_stint_driver(x):
+        try:
+            return str(int(float(x)))
+        except (ValueError, TypeError):
+            return str(x).strip()
+            
+    stint_drivers_normalized = df_stints['Driver'].apply(normalize_stint_driver)
+    df_stints['DriverShort'] = stint_drivers_normalized.map(driver_map)
+    
+    # Fallback for unmapped drivers
+    mask = df_stints['DriverShort'].isna()
+    if mask.any():
+        # Try to use the original value if mapping failed
+        df_stints.loc[mask, 'DriverShort'] = (
+            df_stints.loc[mask, 'Driver'].astype(str)
+            .str.split()
+            .str[-1]
+            .str[:3]
+            .str.upper()
+        )
     
     # Sorrendezés pozíció alapján
     sorted_drivers = []
@@ -229,9 +299,10 @@ def create_tire_graph(race_value, year_selector_value):
         legend=dict(title='Gumi Keverék', traceorder='normal'),
         bargap=0.16,
         template='plotly_dark',
-        # Use fixed inner plot height so container sizing is consistent in Gradio
         height=450,
-        margin=dict(l=120, r=40, t=80, b=80)
+        margin=dict(l=120, r=40, t=80, b=80),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)'
     )
 
     return fig
@@ -291,12 +362,9 @@ def create_qual_graph(selected_drivers, selected_races, selected_teams, years):
     if 'Q3' in filtered_df.columns:
         hover_data['Q3'] = True
 
-    # Prepare round->event mapping for shared x-axis labels
     round_label_map = filtered_df.groupby('RoundNumber')['EventName'].first().to_dict()
-
     filtered_df['Year'] = filtered_df['Year'].astype(str)
 
-    # If single driver selected, draw lines per Year; otherwise color by driver and dash by Year
     if selected_drivers and len(selected_drivers) == 1:
         fig = px.line(
             filtered_df, x='RoundNumber', y=y_col, color='Year', markers=True,
@@ -314,7 +382,7 @@ def create_qual_graph(selected_drivers, selected_races, selected_teams, years):
 
     fig.update_yaxes(autorange="reversed", title="Rajthely")
     fig.update_xaxes(title="Futam")
-    fig.update_layout(template='plotly_dark', autosize=True, height=450, margin=dict(l=120, r=40, t=80, b=80))
+    fig.update_layout(template='plotly_dark', autosize=True, height=450, margin=dict(l=120, r=40, t=80, b=80), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
 
     return fig
 
@@ -372,9 +440,7 @@ def create_race_graph(selected_drivers, selected_races, selected_teams, years):
     if 'Status' in filtered_df.columns:
         hover_data['Status'] = True
 
-    # Prepare round->event mapping for shared x-axis labels
     round_label_map = filtered_df.groupby('RoundNumber')['EventName'].first().to_dict()
-
     filtered_df['Year'] = filtered_df['Year'].astype(str)
 
     if selected_drivers and len(selected_drivers) == 1:
@@ -394,7 +460,7 @@ def create_race_graph(selected_drivers, selected_races, selected_teams, years):
 
     fig.update_yaxes(autorange="reversed", title="Helyezés")
     fig.update_xaxes(title="Futam")
-    fig.update_layout(template='plotly_dark', autosize=True, height=450, margin=dict(l=120, r=40, t=80, b=80))
+    fig.update_layout(template='plotly_dark', autosize=True, height=450, margin=dict(l=120, r=40, t=80, b=80), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
 
     return fig
 
@@ -424,8 +490,6 @@ def create_champ_graph(selected_drivers, selected_teams, years):
         df = df.sort_values('RoundNumber')
         df['CumulativePoints'] = df.groupby('Abbreviation')['Points'].cumsum()
         df['Year'] = year
-        # keep original abbreviations intact; we'll use 'Year' for coloring
-        # and keep the event names separate for tick labels/hover
             
         all_df.append(df)
         
@@ -433,37 +497,29 @@ def create_champ_graph(selected_drivers, selected_teams, years):
         
     df_final = pd.concat(all_df)
     df_final = df_final.sort_values(['Year', 'RoundNumber'])
-
-    # Ensure Year is string for Plotly color grouping
     df_final['Year'] = df_final['Year'].astype(str)
 
     hover_data = {'Points': True, 'Position': True, 'Abbreviation': True, 'Year': True}
-
-    # Prepare x-axis ticks (one shared set). Use RoundNumber as x, map to an EventName label.
     round_label_map = df_final.groupby('RoundNumber')['EventName'].first().to_dict()
 
-    # If a single driver is selected (or filtering by a team resulting in one driver),
-    # draw lines per Year so the same driver across years produces separate lines.
     if selected_drivers and len(selected_drivers) == 1:
         fig = px.line(
             df_final, x='RoundNumber', y='CumulativePoints', color='Year', markers=True,
             title="Világbajnoki Pontverseny Alakulása", hover_data=hover_data
         )
     else:
-        # Multiple drivers: color by driver and differentiate years with line dashes
         fig = px.line(
             df_final, x='RoundNumber', y='CumulativePoints', color='Abbreviation', line_dash='Year', markers=True,
             title="Világbajnoki Pontverseny Alakulása", hover_data=hover_data
         )
 
-    # Apply single x-axis labels using the round->event mapping
     tick_vals = sorted(round_label_map.keys())
     tick_texts = [round_label_map[r] for r in tick_vals]
     fig.update_xaxes(tickmode='array', tickvals=tick_vals, ticktext=tick_texts)
     
     fig.update_yaxes(title="Összpontszám")
     fig.update_xaxes(title="Futam")
-    fig.update_layout(template='plotly_dark', autosize=True, height=450, margin=dict(l=120, r=40, t=80, b=80))
+    fig.update_layout(template='plotly_dark', autosize=True, height=450, margin=dict(l=120, r=40, t=80, b=80), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
     
     return fig
 
@@ -517,28 +573,199 @@ def create_gain_loss_graph(selected_drivers, selected_races, selected_teams, yea
         title="Pozíció Nyereség/Veszteség (Rajthely vs. Befutó)", hover_data=hover_data
     )
 
-    # Horizontal bars: x shows the position change, y shows the event (single shared axis)
     fig.update_xaxes(title="Pozíció Változás (+ Javított, - Rontott)")
     fig.update_yaxes(title="Futam", automargin=True)
-    fig.update_layout(template='plotly_dark', autosize=True, height=450, margin=dict(l=220, r=40, t=80, b=80))
+    fig.update_layout(template='plotly_dark', autosize=True, height=450, margin=dict(l=220, r=40, t=80, b=80), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
     
     return fig
 
+def create_lap_dist_graph(race_value, selected_drivers, selected_teams, years):
+    """Létrehozza a köridő eloszlás Plotly ábráját."""
+    # Handle list input from CheckBoxGroup (take first selected)
+    if isinstance(race_value, list):
+        race_value = race_value[0] if race_value else None
+
+    if not race_value:
+        return go.Figure().update_layout(title="Válassz egy futamot!", template='plotly_dark')
+    
+    try:
+        year, round_number = map(int, str(race_value).split('_'))
+    except ValueError:
+        return go.Figure().update_layout(title="Érvénytelen futam kiválasztás.", template='plotly_dark')
+
+    try:
+        session = fastf1.get_session(year, round_number, 'R')
+        session.load(laps=True, telemetry=False, weather=False, messages=False)
+        laps = session.laps
+        
+        laps = laps.pick_wo_box()
+        
+        if selected_drivers:
+            laps = laps[laps['Driver'].isin(selected_drivers)]
+        elif selected_teams:
+            laps = laps[laps['Team'].isin(selected_teams)]
+        
+        if laps.empty:
+            return go.Figure().update_layout(title="Nincs elérhető köridő adat a kiválasztott szűréshez.", template='plotly_dark')
+        
+        laps['LapTimeSeconds'] = laps['LapTime'].dt.total_seconds()
+        
+        median_lap = laps['LapTimeSeconds'].median()
+        laps_filtered = laps[laps['LapTimeSeconds'] < median_lap * 1.15]
+        if laps_filtered.empty: laps_filtered = laps
+        
+        fig = px.box(
+            laps_filtered, x='Driver', y='LapTimeSeconds', color='Team',
+            title=f"Köridők Eloszlása - {session.event['EventName']} {year}",
+            points="all", hover_data=['LapNumber', 'Compound']
+        )
+        
+        fig.update_yaxes(title="Köridő (másodperc)")
+        fig.update_xaxes(title="Versenyző")
+        fig.update_layout(template='plotly_dark', autosize=True, height=450, margin=dict(l=120, r=40, t=80, b=80), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        
+        return fig
+
+    except Exception as e:
+        return go.Figure().update_layout(title=f"Hiba az adatok betöltésekor: {str(e)}", template='plotly_dark')
+
+def create_map_graph(years):
+    """Létrehozza a világtérképet a futamhelyszínekkel."""
+    if not isinstance(years, list): years = [years]
+    
+    all_schedules = []
+    for year in years:
+        sch = get_schedule_data(year)
+        if not sch.empty:
+            sch = sch.copy()
+            sch['Year'] = str(year)
+            all_schedules.append(sch)
+            
+    if not all_schedules:
+        return go.Figure().update_layout(title="Nincs elérhető naptár adat.", template='plotly_dark')
+        
+    df = pd.concat(all_schedules)
+    
+    # Map coordinates
+    df['Lat'] = df['Location'].map(lambda x: CIRCUIT_LOCATIONS.get(x, (None, None))[0])
+    df['Lon'] = df['Location'].map(lambda x: CIRCUIT_LOCATIONS.get(x, (None, None))[1])
+    
+    # Drop missing
+    df = df.dropna(subset=['Lat', 'Lon'])
+    
+    if df.empty:
+        return go.Figure().update_layout(title="Nem sikerült a koordináták meghatározása.", template='plotly_dark')
+
+    fig = px.scatter_geo(
+        df,
+        lat='Lat',
+        lon='Lon',
+        hover_name='EventName',
+        hover_data={'Location': True, 'Country': True, 'RoundNumber': True, 'EventDate': True, 'Lat': False, 'Lon': False, 'Year': True},
+        custom_data=['Year', 'RoundNumber'],
+        color='Year',
+        projection='natural earth',
+        title="F1 Nagydíjak Helyszínei"
+    )
+    
+    fig.update_geos(
+        visible=True, resolution=110,
+        showcountries=True, countrycolor="#555",
+        showcoastlines=True, coastlinecolor="#555",
+        showland=True, landcolor="#222",
+        showocean=True, oceancolor="#121212",
+        bgcolor='#121212'
+    )
+    
+    fig.update_traces(marker=dict(size=10, line=dict(width=1, color='white')))
+    
+    fig.update_layout(
+        template='plotly_dark',
+        margin=dict(l=0, r=0, t=50, b=0),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        height=600,
+        legend=dict(title='Év'),
+        clickmode='event+select'
+    )
+    return fig
+
+def create_tire_distribution_chart(race_value, year_selector_value):
+    """Létrehozza a gumihasználat kördiagramját (Donut Chart)."""
+    # Handle list input
+    if isinstance(race_value, list):
+        race_value = race_value[0] if race_value else None
+
+    if not race_value:
+        return go.Figure().update_layout(title="Válassz egy futamot!", template='plotly_dark')
+    
+    try:
+        year, round_number = map(int, str(race_value).split('_'))
+    except ValueError:
+        return go.Figure().update_layout(title="Érvénytelen futam kiválasztás.", template='plotly_dark')
+
+    df_all_data, _ = get_data(year)
+    
+    if df_all_data.empty:
+         return go.Figure().update_layout(title="Nincs elérhető adat ehhez az évhez.", template='plotly_dark')
+
+    df_stints = df_all_data[df_all_data['RoundNumber'] == round_number].copy()
+            
+    if df_stints.empty:
+        return go.Figure().update_layout(title="Nincs elérhető adat ehhez a futamhoz.", template='plotly_dark')
+            
+    event_name = df_stints['EventName'].iloc[0]
+    
+    # Aggregate data
+    df_stints['Compound'] = df_stints['Compound'].astype(str).str.upper()
+    
+    # Filter out unknown or test compounds if necessary, but usually we keep them
+    # Sum duration (laps) per compound
+    df_agg = df_stints.groupby('Compound')['Duration'].sum().reset_index()
+    df_agg.columns = ['Compound', 'TotalLaps']
+    
+    # Colors
+    base_colors = {
+        'SOFT': '#FF3333', 'MEDIUM': '#FFF200', 'HARD': '#EBEBEB',
+        'INTERMEDIATE': '#39B54A', 'WET': '#00AEEF', 'UNKNOWN': '#808080'
+    }
+    
+    # Map colors
+    colors = [base_colors.get(c, '#808080') for c in df_agg['Compound']]
+    
+    fig = go.Figure(data=[go.Pie(
+        labels=df_agg['Compound'],
+        values=df_agg['TotalLaps'],
+        hole=.4,
+        marker=dict(colors=colors, line=dict(color='#000000', width=2)),
+        textinfo='label+percent',
+        hoverinfo='label+value+percent'
+    )])
+    
+    fig.update_layout(
+        title=f"Gumihasználat Eloszlása - {event_name} {year}",
+        template='plotly_dark',
+        height=450,
+        margin=dict(l=20, r=20, t=80, b=20),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        showlegend=True
+    )
+    
+    return fig
 
 def render_selected_plot(choice, selected_drivers, selected_races, selected_teams, years):
-    """Generic renderer for the compare view. Chooses the right plotting function.
+    """Generic renderer for the compare view."""
+    # Handle list input from CheckBoxGroup (take first selected)
+    if isinstance(choice, list):
+        choice = choice[0] if choice else None
 
-    Parameters mirror the compare UI: `selected_races` may be a list; for plots
-    that expect a single race, the first element will be used.
-    """
     if not choice:
         return go.Figure().update_layout(title="Válassz diagram típust", template='plotly_dark')
 
-    # Normalize years
     if not isinstance(years, list):
         years = [years] if years is not None else [DEFAULT_YEAR]
 
-    # Ensure inputs are in the expected form
     drivers = selected_drivers or []
     teams = selected_teams or []
     races = selected_races or []
@@ -564,472 +791,505 @@ def render_selected_plot(choice, selected_drivers, selected_races, selected_team
     except Exception as e:
         return go.Figure().update_layout(title=f"Hiba a diagram létrehozásakor: {e}", template='plotly_dark')
 
-def create_lap_dist_graph(race_value, selected_drivers, selected_teams, years):
-    """Létrehozza a köridő eloszlás Plotly ábráját."""
-    if not race_value:
-        return go.Figure().update_layout(title="Válassz egy futamot!", template='plotly_dark')
+# --- Panel UI Setup ---
+
+# Custom CSS for React-like look
+custom_css = """
+:root {
+    --f1-red: #FF1801;
+    --card-bg: #1e1e1e;
+    --page-bg: #121212;
+    --text-color: #e0e0e0;
+    --border-radius: 12px;
+}
+
+body {
+    background-color: var(--page-bg);
+    color: var(--text-color);
+    font-family: 'Roboto', 'Segoe UI', sans-serif;
+}
+
+.bk-root .bk-tabs-header .bk-tab {
+    background-color: transparent;
+    color: #888;
+    border: none;
+    font-weight: 500;
+    transition: color 0.3s ease;
+}
+
+.bk-root .bk-tabs-header .bk-tab.bk-active {
+    color: var(--f1-red);
+    border-bottom: 2px solid var(--f1-red);
+}
+
+.card-box {
+    background-color: var(--card-bg);
+    border-radius: var(--border-radius);
+    padding: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    border: 1px solid #333;
+    margin-bottom: 20px;
+}
+
+.widget-box {
+    background-color: #252525;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-left: 4px solid var(--f1-red);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #1a1a1a; 
+}
+::-webkit-scrollbar-thumb {
+    background: #444; 
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #666; 
+}
+
+/* Dropdown Checkbox Styling */
+.dropdown-btn button {
+    text-align: left !important;
+    justify-content: space-between !important;
+    background-color: #333 !important;
+    color: #e0e0e0 !important;
+    border: 1px solid #555 !important;
+}
+.dropdown-btn button:hover {
+    border-color: var(--f1-red) !important;
+}
+.dropdown-box {
+    background-color: #2a2a2a;
+    border: 1px solid #444;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    padding: 10px;
+    margin-top: -5px;
+    z-index: 100;
+}
+"""
+
+pn.config.raw_css.append(custom_css)
+
+# Initial Data
+INIT_RACE_OPTIONS, INIT_DRIVER_OPTIONS, INIT_TEAM_OPTIONS = get_options([DEFAULT_YEAR])
+INIT_RACE_VALUES = list(INIT_RACE_OPTIONS.values())
+
+# Helper for Dropdown Checkbox
+def create_dropdown_checkbox(name, options, value):
+    # Ensure value is a list
+    if value is None: value = []
+    if not isinstance(value, list): value = [value]
     
-    try:
-        year, round_number = map(int, str(race_value).split('_'))
-    except ValueError:
-        return go.Figure().update_layout(title="Érvénytelen futam kiválasztás.", template='plotly_dark')
-
-    try:
-        # FastF1 adatbetöltés szükséges itt, mert a .xlsx-ben nincs köridő adat
-        session = fastf1.get_session(year, round_number, 'R')
-        session.load(laps=True, telemetry=False, weather=False, messages=False)
-        laps = session.laps
-        
-        laps = laps.pick_wo_box()
-        
-        # A fastf1-ben a 'Driver' oszlop tartalmazza az abbreviációt
-        if selected_drivers:
-            laps = laps[laps['Driver'].isin(selected_drivers)]
-        elif selected_teams:
-            laps = laps[laps['Team'].isin(selected_teams)]
-        
-        if laps.empty:
-            return go.Figure().update_layout(title="Nincs elérhető köridő adat a kiválasztott szűréshez.", template='plotly_dark')
-        
-        laps['LapTimeSeconds'] = laps['LapTime'].dt.total_seconds()
-        
-        # Egyszerű szűrés a skála torzítás ellen
-        median_lap = laps['LapTimeSeconds'].median()
-        laps_filtered = laps[laps['LapTimeSeconds'] < median_lap * 1.15]
-        if laps_filtered.empty: laps_filtered = laps
-        
-        fig = px.box(
-            laps_filtered, x='Driver', y='LapTimeSeconds', color='Team',
-            title=f"Köridők Eloszlása - {session.event['EventName']} {year}",
-            points="all", hover_data=['LapNumber', 'Compound']
-        )
-        
-        fig.update_yaxes(title="Köridő (másodperc)")
-        fig.update_xaxes(title="Versenyző")
-        fig.update_layout(template='plotly_dark', autosize=True, height=450, margin=dict(l=120, r=40, t=80, b=80))
-        
-        return fig
-
-    except Exception as e:
-        return go.Figure().update_layout(title=f"Hiba az adatok betöltésekor: {str(e)}", template='plotly_dark')
-
-# --- Gradio UI és Callback Logika ---
-
-def update_all_options(years):
-    """
-    Frissíti az összes Dropdown opcióját az évválasztó változásakor.
-    """
-    # If no year is provided (e.g. user cleared the selector), do NOT overwrite
-    # the existing dropdown choices/values in the UI. Returning gr.update()
-    # objects with no args tells Gradio to leave those components unchanged.
-    if not years:
-        return tuple([gr.update() for _ in range(17)])
-
-    # get_options a Gradio-nak megfelelő formátumban adja vissza a listákat
-    race_options, driver_values, team_values = get_options(years)
+    # 1. The "Source of Truth" widget (hidden)
+    # We use MultiChoice because it holds list of values and options.
+    # This is what the app logic interacts with (setting options, getting values).
+    state_widget = pn.widgets.MultiChoice(name='state', options=options, value=value, visible=False)
     
-    # A Gradio 4+ Dropdown a values listáját is tudja fogadni choices-ként
-    race_values = [r['value'] for r in race_options]
-    default_race_val = race_values[0] if race_values else None
+    # 2. The UI widgets
+    search_box = pn.widgets.TextInput(placeholder="Keresés...", sizing_mode='stretch_width', margin=(0, 0, 5, 0))
+    
+    # Helper to normalize options for filtering
+    def get_opts_dict(opts):
+        if isinstance(opts, list):
+            return {str(v): v for v in opts}
+        return opts
 
-    # Build per-component updates so we only change the components we intend to.
-    updates = [
-        gr.update(choices=race_values),            # tire_race_dropdown choices
-        gr.update(value=default_race_val),         # tire_race_dropdown value
-        gr.update(choices=race_values),            # qual_race_dropdown choices
-        gr.update(choices=race_values),            # race_race_dropdown choices
-        gr.update(choices=race_values),            # gain_race_dropdown choices
-        gr.update(choices=race_values),            # lap_race_dropdown choices
-        gr.update(value=default_race_val),         # lap_race_dropdown value
-        gr.update(choices=team_values),            # qual_team_dropdown choices
-        gr.update(choices=driver_values),          # qual_driver_dropdown choices
-        gr.update(choices=team_values),            # race_team_dropdown choices
-        gr.update(choices=driver_values),          # race_driver_dropdown choices
-        gr.update(choices=team_values),            # champ_team_dropdown choices
-        gr.update(choices=driver_values),          # champ_driver_dropdown choices
-        gr.update(choices=team_values),            # gain_team_dropdown choices
-        gr.update(choices=driver_values),          # gain_driver_dropdown choices
-        gr.update(choices=team_values),            # lap_team_dropdown choices
-        gr.update(choices=driver_values)           # lap_driver_dropdown choices
-    ]
-
-    return tuple(updates)
-
-# A Gradio Blocks felépítése
-# !!! HIBAJAVÍTÁS: ELTÁVOLÍTVA A 'theme' ARGUMENTUM !!!
-with gr.Blocks(title="F1 Szezon Elemző") as app:
-    gr.Markdown("<h1>F1 Szezon Elemző (Gradio)</h1>")
-    # Ensure Plotly plot containers use the full available width and consistent height
-    gr.HTML("""
-    <style>
-    .js-plotly-plot, .plotly-graph-div { width: 100% !important; }
-    .js-plotly-plot .svg-container { width: 100% !important; height: 450px !important; }
-    </style>
-    """)
-
-    # --- Vezérlőpult ---
-    with gr.Row():
-        with gr.Column(scale=1):
-            year_selector = gr.Dropdown(
-                label="Év",
-                choices=[y for y in range(2021, 2025)],
-                value=[DEFAULT_YEAR],
-                multiselect=True,
-                allow_custom_value=True
-            )
-        with gr.Column(scale=2):
-            gr.Markdown("A Gradio elrendezése fixen fülönkénti.")
-
-    # --- Graph Containers (Fülek) ---
-    with gr.Tabs() as tabs:
+    opts_dict = get_opts_dict(options)
         
-        # 1. Gumistratégiák
-        with gr.TabItem("Gumistratégiák", id=0):
-            with gr.Row():
-                tire_race_dropdown = gr.Dropdown(
-                    label="Válassz futamot:",
-                    choices=INIT_RACE_VALUES,
-                    value=INIT_RACE_VALUES[0] if INIT_RACE_VALUES else None,
-                    interactive=True,
-                    allow_custom_value=True
-                )
-            # !!! HIBAJAVÍTÁS: ELTÁVOLÍTVA A 'height' ARGUMENTUM !!!
-            with gr.Row():
-                tire_graph = gr.Plot(label="Gumistratégiák Ábrája")
+    # Initial CBG options (all)
+    cbg = pn.widgets.CheckBoxGroup(name='', options=options, value=value, sizing_mode='stretch_width')
+    
+    # Toggle Button
+    btn = pn.widgets.Button(name=f"{name} ({len(value)}) ▼", button_type='default', css_classes=['dropdown-btn'])
+    
+    # Container
+    container = pn.Column(search_box, cbg, visible=False, max_height=300, scroll=True, css_classes=['dropdown-box'], sizing_mode='stretch_width')
+    
+    # Logic flags
+    is_updating_cbg = False
+    
+    def toggle(event):
+        container.visible = not container.visible
+        icon = "▲" if container.visible else "▼"
+        btn.name = f"{name} ({len(state_widget.value)}) {icon}"
+        
+    def on_search(event):
+        nonlocal is_updating_cbg
+        term = event.new.lower() if event.new else ""
+        
+        # Filter options
+        if not term:
+            new_opts = state_widget.options # Restore full options from state
+        else:
+            # Filter keys in opts_dict
+            new_opts = {k: v for k, v in opts_dict.items() if term in str(k).lower()}
+        
+        is_updating_cbg = True
+        cbg.options = new_opts
+        
+        # Update cbg value to match state_widget but only for visible options
+        allowed_values = list(new_opts.values()) if isinstance(new_opts, dict) else new_opts
+        cbg.value = [v for v in state_widget.value if v in allowed_values]
+        is_updating_cbg = False
+        
+    def on_cbg_change(event):
+        nonlocal is_updating_cbg
+        if is_updating_cbg: return
+        
+        # User clicked a checkbox -> Update state_widget.value
+        current_visible_opts = cbg.options
+        visible_values = list(current_visible_opts.values()) if isinstance(current_visible_opts, dict) else current_visible_opts
+        
+        # Items in state that are NOT currently visible (should be preserved)
+        hidden_selected = [v for v in state_widget.value if v not in visible_values]
+        
+        # New state
+        new_state = hidden_selected + event.new
+        
+        # Update state widget
+        state_widget.value = new_state
+        
+        # Update button label
+        icon = "▲" if container.visible else "▼"
+        btn.name = f"{name} ({len(new_state)}) {icon}"
+
+    # Watchers
+    btn.on_click(toggle)
+    search_box.param.watch(on_search, 'value')
+    cbg.param.watch(on_cbg_change, 'value')
+    
+    # Watch state_widget changes (external updates)
+    def on_state_change(event):
+        # Update button label
+        icon = "▲" if container.visible else "▼"
+        btn.name = f"{name} ({len(event.new)}) {icon}"
+        
+        # Update cbg value if needed
+        current_visible_opts = cbg.options
+        visible_values = list(current_visible_opts.values()) if isinstance(current_visible_opts, dict) else current_visible_opts
+        
+        expected_cbg_val = [v for v in event.new if v in visible_values]
+        
+        # Only update if different to avoid loops
+        if set(cbg.value) != set(expected_cbg_val):
+            nonlocal is_updating_cbg
+            is_updating_cbg = True
+            cbg.value = expected_cbg_val
+            is_updating_cbg = False
             
-            # Callback a legördülő menük frissítésére
-            year_selector.change(
-                fn=update_all_options,
-                inputs=[year_selector],
-                outputs=[
-                    tire_race_dropdown, tire_race_dropdown,
-                    gr.State(), gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State()
-                ],
-                queue=True
-            )
-            # Callback a grafikon frissítésére
-            tire_race_dropdown.change(
-                fn=create_tire_graph,
-                inputs=[tire_race_dropdown, year_selector],
-                outputs=[tire_graph],
-                queue=False
-            )
+    state_widget.param.watch(on_state_change, 'value')
+    
+    # Watch options changes on state_widget
+    def on_options_change(event):
+        nonlocal opts_dict
+        new_options = event.new
+        opts_dict = get_opts_dict(new_options)
+        
+        # Re-apply search filter (which updates cbg.options)
+        on_search(type('obj', (object,), {'new': search_box.value})())
+        
+    state_widget.param.watch(on_options_change, 'options')
+
+    # Layout
+    widget_layout = pn.Column(pn.pane.Markdown(f"**{name}**"), btn, container, sizing_mode='stretch_width')
+    
+    return widget_layout, state_widget
+
+# Global Year Selector
+year_layout, year_selector = create_dropdown_checkbox('📅 Szezon Kiválasztása', [y for y in range(2021, 2025)], [DEFAULT_YEAR])
+
+# --- Widgets for each tab ---
+
+# 1. Gumistratégiák
+tire_race_layout, tire_race_select = create_dropdown_checkbox('🏁 Futam', INIT_RACE_OPTIONS, [INIT_RACE_VALUES[0]] if INIT_RACE_VALUES else [])
+
+# 2. Kvalifikáció
+qual_team_layout, qual_team_select = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
+qual_driver_layout, qual_driver_select = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
+qual_race_layout, qual_race_select = create_dropdown_checkbox('🏁 Futamok', INIT_RACE_OPTIONS, INIT_RACE_VALUES)
+
+# 3. Verseny
+race_team_layout, race_team_select = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
+race_driver_layout, race_driver_select = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
+race_race_layout, race_race_select = create_dropdown_checkbox('🏁 Futamok', INIT_RACE_OPTIONS, INIT_RACE_VALUES)
+
+# 4. Bajnokság
+champ_team_layout, champ_team_select = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
+champ_driver_layout, champ_driver_select = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
+
+# 5. Pozíció Változás
+gain_team_layout, gain_team_select = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
+gain_driver_layout, gain_driver_select = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
+gain_race_layout, gain_race_select = create_dropdown_checkbox('🏁 Futamok', INIT_RACE_OPTIONS, INIT_RACE_VALUES)
+
+# 6. Köridők
+lap_race_layout, lap_race_select = create_dropdown_checkbox('🏁 Futam', INIT_RACE_OPTIONS, [INIT_RACE_VALUES[0]] if INIT_RACE_VALUES else [])
+lap_team_layout, lap_team_select = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
+lap_driver_layout, lap_driver_select = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
+
+# 7. Map
+map_race_layout, map_race_select = create_dropdown_checkbox('🏁 Futam (Kördiagram)', INIT_RACE_OPTIONS, [INIT_RACE_VALUES[0]] if INIT_RACE_VALUES else [])
+
+# 8. Compare
+# Left
+comp_left_choice_layout, comp_left_choice = create_dropdown_checkbox("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők'], ['Bajnokság'])
+comp_left_year_layout, comp_left_year = create_dropdown_checkbox('📅 Év', [y for y in range(2021, 2025)], [DEFAULT_YEAR])
+comp_left_race_layout, comp_left_race = create_dropdown_checkbox('🏁 Futam', INIT_RACE_OPTIONS, INIT_RACE_VALUES)
+comp_left_team_layout, comp_left_team = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
+comp_left_driver_layout, comp_left_driver = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
+
+# Right
+comp_right_choice_layout, comp_right_choice = create_dropdown_checkbox("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők'], ['Verseny'])
+comp_right_year_layout, comp_right_year = create_dropdown_checkbox('📅 Év', [y for y in range(2021, 2025)], [DEFAULT_YEAR])
+comp_right_race_layout, comp_right_race = create_dropdown_checkbox('🏁 Futam', INIT_RACE_OPTIONS, INIT_RACE_VALUES)
+comp_right_team_layout, comp_right_team = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
+comp_right_driver_layout, comp_right_driver = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
 
 
-        # 2. Kvalifikációs Eredmények
-        with gr.TabItem("Kvalifikáció", id=1):
-            with gr.Row():
-                qual_team_dropdown = gr.Dropdown(label="Válassz csapatot:", choices=INIT_TEAM_OPTIONS, multiselect=True, allow_custom_value=True)
-                qual_driver_dropdown = gr.Dropdown(label="Válassz versenyzőket:", choices=INIT_DRIVER_OPTIONS, multiselect=True, allow_custom_value=True)
-            with gr.Row():
-                qual_race_dropdown = gr.Dropdown(
-                    label="Válassz futamokat:",
-                    choices=INIT_RACE_VALUES,
-                    value=INIT_RACE_VALUES,
-                    multiselect=True,
-                    allow_custom_value=True
-                )
-            # !!! HIBAJAVÍTÁS: ELTÁVOLÍTVA A 'height' ARGUMENTUM !!!
-            with gr.Row():
-                qual_graph = gr.Plot(label="Rajthelyek alakulása")
+# --- Update Logic ---
 
-            # Callback: frissítjük az opciókat (a többi fülnél is ezt használjuk, csak a megfelelő outputokat frissítjük)
-            year_selector.change(
-                fn=update_all_options,
-                inputs=[year_selector],
-                outputs=[
-                    gr.State(), gr.State(),
-                    qual_race_dropdown, 
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    qual_team_dropdown, qual_driver_dropdown, 
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State()
-                ],
-                queue=True
-            )
-            # Callback: a grafikon frissítése
-            qual_inputs = [qual_driver_dropdown, qual_race_dropdown, qual_team_dropdown, year_selector]
-            for input_comp in qual_inputs:
-                input_comp.change(
-                    fn=create_qual_graph,
-                    inputs=qual_inputs,
-                    outputs=[qual_graph],
-                    queue=False
-                )
+def update_widgets_options(years, *widgets_groups):
+    """Updates options for a list of widget groups based on selected years."""
+    if not years: return
+    race_opts, driver_opts, team_opts = get_options(years)
+    race_vals = list(race_opts.values())
+    default_race = race_vals[0] if race_vals else None
+    
+    for group in widgets_groups:
+        # Unpack group: (race_widget, team_widget, driver_widget) - some might be None
+        race_w, team_w, driver_w = group
+        
+        if race_w:
+            race_w.options = race_opts
+            # Preserve selection if possible, else reset
+            if isinstance(race_w, pn.widgets.Select):
+                if race_w.value not in race_vals:
+                    race_w.value = default_race
+            elif isinstance(race_w, (pn.widgets.MultiChoice, pn.widgets.CheckBoxGroup)):
+                new_vals = [v for v in race_w.value if v in race_vals]
+                if not new_vals and race_vals:
+                    new_vals = race_vals # Select all by default or logic? Gradio kept existing.
+                race_w.value = new_vals
 
+        if team_w:
+            team_w.options = team_opts
+            new_vals = [v for v in team_w.value if v in team_opts]
+            team_w.value = new_vals
+            
+        if driver_w:
+            driver_w.options = driver_opts
+            new_vals = [v for v in driver_w.value if v in list(driver_opts.values())]
+            driver_w.value = new_vals
 
-        # 3. Verseny Eredmények
-        with gr.TabItem("Verseny", id=2):
-            with gr.Row():
-                race_team_dropdown = gr.Dropdown(label="Válassz csapatot:", choices=INIT_TEAM_OPTIONS, multiselect=True, allow_custom_value=True)
-                race_driver_dropdown = gr.Dropdown(label="Válassz versenyzőket:", choices=INIT_DRIVER_OPTIONS, multiselect=True, allow_custom_value=True)
-            with gr.Row():
-                race_race_dropdown = gr.Dropdown(
-                    label="Válassz futamokat:",
-                    choices=INIT_RACE_VALUES,
-                    value=INIT_RACE_VALUES,
-                    multiselect=True,
-                    allow_custom_value=True
-                )
-            # !!! HIBAJAVÍTÁS: ELTÁVOLÍTVA A 'height' ARGUMENTUM !!!
-            with gr.Row():
-                race_graph = gr.Plot(
-                    label="Versenyeredmények alakulása",
-                    value=go.Figure(layout=go.Layout(template='plotly_dark', width=1200, height=450, margin=dict(l=120, r=40, t=80, b=80)))
-                )
-
-            year_selector.change(
-                fn=update_all_options,
-                inputs=[year_selector],
-                outputs=[
-                    gr.State(), gr.State(),
-                    gr.State(),
-                    race_race_dropdown, 
-                    gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    race_team_dropdown, race_driver_dropdown, 
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State()
-                ],
-                queue=True
-            )
-            race_inputs = [race_driver_dropdown, race_race_dropdown, race_team_dropdown, year_selector]
-            for input_comp in race_inputs:
-                input_comp.change(
-                    fn=create_race_graph,
-                    inputs=race_inputs,
-                    outputs=[race_graph],
-                    queue=False
-                )
-
-        # 4. Világbajnoki Pontverseny
-        with gr.TabItem("Bajnokság", id=3):
-            with gr.Row():
-                champ_team_dropdown = gr.Dropdown(label="Válassz csapatot:", choices=INIT_TEAM_OPTIONS, multiselect=True, allow_custom_value=True)
-                champ_driver_dropdown = gr.Dropdown(label="Válassz versenyzőket:", choices=INIT_DRIVER_OPTIONS, multiselect=True, allow_custom_value=True)
-            # !!! HIBAJAVÍTÁS: ELTÁVOLÍTVA A 'height' ARGUMENTUM !!!
-            with gr.Row():
-                champ_graph = gr.Plot(
-                    label="Világbajnoki Pontverseny Alakulása",
-                    value=go.Figure(layout=go.Layout(template='plotly_dark', width=1200, height=450, margin=dict(l=120, r=40, t=80, b=80)))
-                )
-
-            year_selector.change(
-                fn=update_all_options,
-                inputs=[year_selector],
-                outputs=[
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    champ_team_dropdown, champ_driver_dropdown, 
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State()
-                ],
-                queue=True
-            )
-            champ_inputs = [champ_driver_dropdown, champ_team_dropdown, year_selector]
-            for input_comp in champ_inputs:
-                input_comp.change(
-                    fn=create_champ_graph,
-                    inputs=champ_inputs,
-                    outputs=[champ_graph],
-                    queue=False
-                )
-
-
-        # 5. Pozíció Változás
-        with gr.TabItem("Pozíció Változás", id=4):
-            with gr.Row():
-                gain_team_dropdown = gr.Dropdown(label="Válassz csapatot:", choices=INIT_TEAM_OPTIONS, multiselect=True, allow_custom_value=True)
-                gain_driver_dropdown = gr.Dropdown(label="Válassz versenyzőket:", choices=INIT_DRIVER_OPTIONS, multiselect=True, allow_custom_value=True)
-            with gr.Row():
-                gain_race_dropdown = gr.Dropdown(
-                    label="Válassz futamokat:",
-                    choices=INIT_RACE_VALUES,
-                    value=INIT_RACE_VALUES,
-                    multiselect=True,
-                    allow_custom_value=True
-                )
-            # !!! HIBAJAVÍTÁS: ELTÁVOLÍTVA A 'height' ARGUMENTUM !!!
-            with gr.Row():
-                gain_graph = gr.Plot(
-                    label="Pozíció Nyereség/Veszteség",
-                    value=go.Figure(layout=go.Layout(template='plotly_dark', width=1200, height=450, margin=dict(l=120, r=40, t=80, b=80)))
-                )
-
-            year_selector.change(
-                fn=update_all_options,
-                inputs=[year_selector],
-                outputs=[
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gain_race_dropdown, 
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gain_team_dropdown, gain_driver_dropdown, 
-                    gr.State(), gr.State()
-                ],
-                queue=True
-            )
-            gain_inputs = [gain_driver_dropdown, gain_race_dropdown, gain_team_dropdown, year_selector]
-            for input_comp in gain_inputs:
-                input_comp.change(
-                    fn=create_gain_loss_graph,
-                    inputs=gain_inputs,
-                    outputs=[gain_graph],
-                    queue=False
-                )
-
-        # 6. Köridők Eloszlása
-        with gr.TabItem("Köridők", id=5):
-            with gr.Row():
-                lap_race_dropdown = gr.Dropdown(
-                    label="Válassz futamot:",
-                    choices=INIT_RACE_VALUES,
-                    value=INIT_RACE_VALUES[0] if INIT_RACE_VALUES else None,
-                    interactive=True,
-                    allow_custom_value=True
-                )
-            with gr.Row():
-                lap_team_dropdown = gr.Dropdown(label="Válassz csapatot:", choices=INIT_TEAM_OPTIONS, multiselect=True, allow_custom_value=True)
-                lap_driver_dropdown = gr.Dropdown(label="Válassz versenyzőket:", choices=INIT_DRIVER_OPTIONS, multiselect=True, allow_custom_value=True)
-            # !!! HIBAJAVÍTÁS: ELTÁVOLÍTVA A 'height' ARGUMENTUM !!!
-            with gr.Row():
-                lap_graph = gr.Plot(label="Köridők Eloszlása Box Plot")
-
-            year_selector.change(
-                fn=update_all_options,
-                inputs=[year_selector],
-                outputs=[
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(), gr.State(),
-                    lap_race_dropdown, lap_race_dropdown, 
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    gr.State(), gr.State(),
-                    lap_team_dropdown, lap_driver_dropdown 
-                ],
-                queue=True
-            )
-            lap_inputs = [lap_race_dropdown, lap_driver_dropdown, lap_team_dropdown, year_selector]
-            for input_comp in lap_inputs:
-                input_comp.change(
-                    fn=create_lap_dist_graph,
-                    inputs=lap_inputs,
-                    outputs=[lap_graph],
-                    queue=False
-                )
-
-        # 7. Compare (side-by-side)
-        with gr.TabItem("Compare", id=6):
-            with gr.Row():
-                # Left column controls
-                with gr.Column():
-                    compare_left_choice = gr.Dropdown(label="Bal diagram típusa:", choices=[
-                        'Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők'
-                    ], value='Bajnokság')
-                    compare_left_year = gr.Dropdown(label='Év (bal)', choices=[y for y in range(2021, 2025)], value=[DEFAULT_YEAR], multiselect=True, allow_custom_value=True)
-                    compare_left_race = gr.Dropdown(label='Futam (bal)', choices=INIT_RACE_VALUES, value=INIT_RACE_VALUES[0] if INIT_RACE_VALUES else None, multiselect=True, allow_custom_value=True)
-                    compare_left_team = gr.Dropdown(label='Csapat (bal)', choices=INIT_TEAM_OPTIONS, multiselect=True, allow_custom_value=True)
-                    compare_left_driver = gr.Dropdown(label='Versenyző (bal)', choices=INIT_DRIVER_OPTIONS, multiselect=True, allow_custom_value=True)
-                    compare_left_update = gr.Button('Frissít (bal)')
-                    compare_left_plot = gr.Plot(label='Bal Diagram')
-
-                # Right column controls
-                with gr.Column():
-                    compare_right_choice = gr.Dropdown(label="Jobb diagram típusa:", choices=[
-                        'Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők'
-                    ], value='Verseny')
-                    compare_right_year = gr.Dropdown(label='Év (jobb)', choices=[y for y in range(2021, 2025)], value=[DEFAULT_YEAR], multiselect=True, allow_custom_value=True)
-                    compare_right_race = gr.Dropdown(label='Futam (jobb)', choices=INIT_RACE_VALUES, value=INIT_RACE_VALUES[0] if INIT_RACE_VALUES else None, multiselect=True, allow_custom_value=True)
-                    compare_right_team = gr.Dropdown(label='Csapat (jobb)', choices=INIT_TEAM_OPTIONS, multiselect=True, allow_custom_value=True)
-                    compare_right_driver = gr.Dropdown(label='Versenyző (jobb)', choices=INIT_DRIVER_OPTIONS, multiselect=True, allow_custom_value=True)
-                    compare_right_update = gr.Button('Frissít (jobb)')
-                    compare_right_plot = gr.Plot(label='Jobb Diagram')
-
-            # Wire buttons to renderer
-            compare_left_update.click(
-                fn=render_selected_plot,
-                inputs=[compare_left_choice, compare_left_driver, compare_left_race, compare_left_team, compare_left_year],
-                outputs=[compare_left_plot]
-            )
-            compare_right_update.click(
-                fn=render_selected_plot,
-                inputs=[compare_right_choice, compare_right_driver, compare_right_race, compare_right_team, compare_right_year],
-                outputs=[compare_right_plot]
-            )
-
-            # Auto-update when any control changes (no need to click the button)
-            for inp in [compare_left_choice, compare_left_driver, compare_left_race, compare_left_team, compare_left_year]:
-                inp.change(
-                    fn=render_selected_plot,
-                    inputs=[compare_left_choice, compare_left_driver, compare_left_race, compare_left_team, compare_left_year],
-                    outputs=[compare_left_plot],
-                    queue=False
-                )
-
-            for inp in [compare_right_choice, compare_right_driver, compare_right_race, compare_right_team, compare_right_year]:
-                inp.change(
-                    fn=render_selected_plot,
-                    inputs=[compare_right_choice, compare_right_driver, compare_right_race, compare_right_team, compare_right_year],
-                    outputs=[compare_right_plot],
-                    queue=False
-                )
-
-
-# Move app.load calls inside the main Blocks context (after all UI definitions)
-    app.load(
-        fn=create_tire_graph,
-        inputs=[tire_race_dropdown, year_selector],
-        outputs=[tire_graph],
-        queue=False
-    )
-    app.load(
-        fn=create_qual_graph,
-        inputs=[qual_driver_dropdown, qual_race_dropdown, qual_team_dropdown, year_selector],
-        outputs=[qual_graph],
-        queue=False
-    )
-    app.load(
-        fn=create_race_graph,
-        inputs=[race_driver_dropdown, race_race_dropdown, race_team_dropdown, year_selector],
-        outputs=[race_graph],
-        queue=False
-    )
-    app.load(
-        fn=create_champ_graph,
-        inputs=[champ_driver_dropdown, champ_team_dropdown, year_selector],
-        outputs=[champ_graph],
-        queue=False
-    )
-    app.load(
-        fn=create_gain_loss_graph,
-        inputs=[gain_driver_dropdown, gain_race_dropdown, gain_team_dropdown, year_selector],
-        outputs=[gain_graph],
-        queue=False
-    )
-    app.load(
-        fn=create_lap_dist_graph,
-        inputs=[lap_race_dropdown, lap_driver_dropdown, lap_team_dropdown, year_selector],
-        outputs=[lap_graph],
-        queue=False
+def on_year_change(event):
+    years = event.new
+    # Update main tabs widgets
+    update_widgets_options(years, 
+        (tire_race_select, None, None),
+        (qual_race_select, qual_team_select, qual_driver_select),
+        (race_race_select, race_team_select, race_driver_select),
+        (None, champ_team_select, champ_driver_select),
+        (gain_race_select, gain_team_select, gain_driver_select),
+        (lap_race_select, lap_team_select, lap_driver_select),
+        (map_race_select, None, None)
     )
 
-if __name__ == "__main__":
-    app.launch()
+year_selector.param.watch(on_year_change, 'value')
+
+# Compare tab has its own year selectors
+def on_comp_left_year_change(event):
+    update_widgets_options(event.new, (comp_left_race, comp_left_team, comp_left_driver))
+
+def on_comp_right_year_change(event):
+    update_widgets_options(event.new, (comp_right_race, comp_right_team, comp_right_driver))
+
+comp_left_year.param.watch(on_comp_left_year_change, 'value')
+comp_right_year.param.watch(on_comp_right_year_change, 'value')
+
+
+# --- Plot Bindings ---
+
+# 1. Tire
+tire_plot = pn.bind(create_tire_graph, tire_race_select, year_selector)
+
+# 2. Qual
+qual_plot = pn.bind(create_qual_graph, qual_driver_select, qual_race_select, qual_team_select, year_selector)
+
+# 3. Race
+race_plot = pn.bind(create_race_graph, race_driver_select, race_race_select, race_team_select, year_selector)
+
+# 4. Champ
+champ_plot = pn.bind(create_champ_graph, champ_driver_select, champ_team_select, year_selector)
+
+# 5. Gain
+gain_plot = pn.bind(create_gain_loss_graph, gain_driver_select, gain_race_select, gain_team_select, year_selector)
+
+# 6. Lap
+lap_plot = pn.bind(create_lap_dist_graph, lap_race_select, lap_driver_select, lap_team_select, year_selector)
+
+# 7. Map
+map_plot = pn.bind(create_map_graph, year_selector)
+
+# Map Pane with Click Listener
+map_pane = pn.pane.Plotly(map_plot, sizing_mode='stretch_both', height=600)
+
+def on_map_click(event):
+    if event.new and 'points' in event.new:
+        try:
+            point = event.new['points'][0]
+            # customdata is usually a list [Year, RoundNumber]
+            cdata = point.get('customdata', [])
+            if len(cdata) >= 2:
+                y, r = cdata[0], cdata[1]
+                val = f"{y}_{r}"
+                # Update the selector
+                map_race_select.value = [val]
+        except Exception as e:
+            print(f"Click error: {e}")
+
+map_pane.param.watch(on_map_click, 'click_data')
+
+map_pie_plot = pn.bind(create_tire_distribution_chart, map_race_select, year_selector)
+
+# 8. Compare
+comp_left_plot = pn.bind(render_selected_plot, comp_left_choice, comp_left_driver, comp_left_race, comp_left_team, comp_left_year)
+comp_right_plot = pn.bind(render_selected_plot, comp_right_choice, comp_right_driver, comp_right_race, comp_right_team, comp_right_year)
+
+
+# --- Layout Construction ---
+
+# Helper for tab content layout with "Card" look
+def create_tab_layout(widgets, plot, title="Diagram"):
+    return pn.Column(
+        pn.Row(
+            pn.Column(
+                pn.pane.Markdown(f"### ⚙️ Beállítások"),
+                *widgets,
+                css_classes=['widget-box'],
+                sizing_mode='stretch_width'
+            ),
+            sizing_mode='stretch_width'
+        ),
+        pn.Column(
+            pn.pane.Markdown(f"### 📈 {title}"),
+            pn.pane.Plotly(plot, sizing_mode='stretch_width', height=500),
+            css_classes=['card-box'],
+            sizing_mode='stretch_width'
+        ),
+        sizing_mode='stretch_width',
+        margin=(10, 20)
+    )
+
+# 1. Tire Tab
+tab_tire = create_tab_layout([tire_race_layout], tire_plot, "Gumistratégiák")
+
+# 2. Qual Tab
+tab_qual = create_tab_layout([qual_team_layout, qual_driver_layout, qual_race_layout], qual_plot, "Kvalifikációs Eredmények")
+
+# 3. Race Tab
+tab_race = create_tab_layout([race_team_layout, race_driver_layout, race_race_layout], race_plot, "Verseny Eredmények")
+
+# 4. Champ Tab
+tab_champ = create_tab_layout([champ_team_layout, champ_driver_layout], champ_plot, "Bajnoki Pontverseny")
+
+# 5. Gain Tab
+tab_gain = create_tab_layout([gain_team_layout, gain_driver_layout, gain_race_layout], gain_plot, "Pozíció Változás")
+
+# 6. Lap Tab
+tab_lap = create_tab_layout([lap_race_layout, lap_team_layout, lap_driver_layout], lap_plot, "Köridők Eloszlása")
+
+# 7. Map Tab
+tab_map = pn.Row(
+    pn.Column(
+        pn.pane.Markdown("### 🗺️ Versenynaptár (Kattints a pontokra!)"),
+        map_pane,
+        css_classes=['card-box'],
+        sizing_mode='stretch_both', # Map takes available space
+        min_width=600
+    ),
+    pn.Column(
+        pn.pane.Markdown("### 🍩 Gumihasználat"),
+        map_race_layout, # Keep the dropdown too
+        pn.pane.Plotly(map_pie_plot, sizing_mode='stretch_width', height=450),
+        css_classes=['card-box'],
+        sizing_mode='fixed',
+        width=450,
+        margin=(0, 0, 0, 20)
+    ),
+    sizing_mode='stretch_both'
+)
+
+# 8. Compare Tab
+tab_compare = pn.Row(
+    pn.Column(
+        pn.pane.Markdown("### 👈 Bal Oldal"),
+        pn.Column(
+            comp_left_choice_layout, comp_left_year_layout, comp_left_race_layout, comp_left_team_layout, comp_left_driver_layout,
+            css_classes=['widget-box']
+        ),
+        pn.Column(
+            pn.pane.Plotly(comp_left_plot, sizing_mode='stretch_width', height=450),
+            css_classes=['card-box']
+        ),
+        sizing_mode='stretch_width', margin=10
+    ),
+    pn.Column(
+        pn.pane.Markdown("### 👉 Jobb Oldal"),
+        pn.Column(
+            comp_right_choice_layout, comp_right_year_layout, comp_right_race_layout, comp_right_team_layout, comp_right_driver_layout,
+            css_classes=['widget-box']
+        ),
+        pn.Column(
+            pn.pane.Plotly(comp_right_plot, sizing_mode='stretch_width', height=450),
+            css_classes=['card-box']
+        ),
+        sizing_mode='stretch_width', margin=10
+    )
+)
+
+# Main Tabs
+tabs = pn.Tabs(
+    ('🛞 Gumik', tab_tire),
+    ('⏱️ Kvalifikáció', tab_qual),
+    ('🏁 Verseny', tab_race),
+    ('🏆 Bajnokság', tab_champ),
+    ('📊 Pozíciók', tab_gain),
+    ('🏎️ Köridők', tab_lap),
+    ('🗺️ Térkép', tab_map),
+    ('⚖️ Összehasonlítás', tab_compare),
+    dynamic=True
+)
+
+# App Template
+template = pn.template.FastListTemplate(
+    title='F1 Data Viz 2025',
+    sidebar=[
+        pn.pane.Markdown("## 🌍 Globális Beállítások"),
+        year_layout,
+        pn.pane.Markdown("---"),
+        pn.pane.Markdown("### ℹ️ Info"),
+        pn.pane.Markdown("Válassz évet a globális fülekhez. A 'Összehasonlítás' fülön külön évválasztó van.")
+    ],
+    main=[tabs],
+    accent_base_color="#FF1801",
+    header_background="#1a1a1a",
+    background_color="#121212",
+    theme='dark',
+    theme_toggle=False,
+    shadow=False
+)
+
+if __name__.startswith("bokeh"):
+    template.servable()
+else:
+    # For running as a script
+    template.show()
