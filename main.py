@@ -1002,11 +1002,37 @@ def create_dropdown_checkbox(name, options, value):
     # Initial CBG options (all)
     cbg = pn.widgets.CheckBoxGroup(name='', options=options, value=value, sizing_mode='stretch_width')
     
+    # Toggle All Button
+    toggle_all_btn = pn.widgets.Button(name="Összes kijelölése / Törlése", button_type='light', sizing_mode='stretch_width', margin=(0, 0, 5, 0), height=30)
+    
+    def on_toggle_all(event):
+        # Get currently visible options
+        current_opts = cbg.options
+        visible_values = list(current_opts.values()) if isinstance(current_opts, dict) else current_opts
+        
+        if not visible_values: return
+
+        # Check if all visible are currently selected
+        current_selected_visible = [v for v in state_widget.value if v in visible_values]
+        all_selected = len(current_selected_visible) == len(visible_values)
+        
+        if all_selected:
+            # Deselect all visible
+            new_state = [v for v in state_widget.value if v not in visible_values]
+        else:
+            # Select all visible
+            hidden_selected = [v for v in state_widget.value if v not in visible_values]
+            new_state = hidden_selected + visible_values
+        
+        state_widget.value = new_state
+
+    toggle_all_btn.on_click(on_toggle_all)
+
     # Toggle Button
     btn = pn.widgets.Button(name=f"{name} ({len(value)}) ▼", button_type='default', css_classes=['dropdown-btn'])
     
     # Container
-    container = pn.Column(search_box, cbg, visible=False, max_height=300, scroll=True, css_classes=['dropdown-box'], sizing_mode='stretch_width')
+    container = pn.Column(search_box, toggle_all_btn, cbg, visible=False, max_height=300, scroll=True, css_classes=['dropdown-box'], sizing_mode='stretch_width')
     
     # Logic flags
     is_updating_cbg = False
