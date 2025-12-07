@@ -5,10 +5,13 @@ import pandas as pd
 import os
 import fastf1
 import fastf1.plotting
+import folium
+import math
 from functools import lru_cache
 
+
 # Initialize Panel extension with Plotly and specific design template
-pn.extension('plotly', design='material', theme='dark')
+pn.extension('plotly', 'folium', design='material', theme='dark')
 
 # --- Globális Beállítások és Adatkezelő Függvények ---
 
@@ -629,9 +632,13 @@ def create_lap_dist_graph(race_value, selected_drivers, selected_teams, years):
     except Exception as e:
         return go.Figure().update_layout(title=f"Hiba az adatok betöltésekor: {str(e)}", template='plotly_dark')
 
-def create_map_graph(years):
-    """Létrehozza a világtérképet a futamhelyszínekkel."""
+def create_map_graph(years, selected_race=None):
+    """Létrehozza a világtérképet a futamhelyszínekkel (Folium)."""
     if not isinstance(years, list): years = [years]
+    
+    # Handle list input for selected_race
+    if isinstance(selected_race, list):
+        selected_race = selected_race[0] if selected_race else None
     
     all_schedules = []
     for year in years:
@@ -642,7 +649,7 @@ def create_map_graph(years):
             all_schedules.append(sch)
             
     if not all_schedules:
-        return go.Figure().update_layout(title="Nincs elérhető naptár adat.", template='plotly_dark')
+        return folium.Map(location=[20, 0], zoom_start=2, tiles="CartoDB dark_matter")
         
     df = pd.concat(all_schedules)
     
@@ -653,42 +660,123 @@ def create_map_graph(years):
     # Drop missing
     df = df.dropna(subset=['Lat', 'Lon'])
     
-    if df.empty:
-        return go.Figure().update_layout(title="Nem sikerült a koordináták meghatározása.", template='plotly_dark')
+    # Create Folium map
+    m = folium.Map(location=[20, 0], zoom_start=2, tiles="CartoDB dark_matter")
 
-    fig = px.scatter_geo(
-        df,
-        lat='Lat',
-        lon='Lon',
-        hover_name='EventName',
-        hover_data={'Location': True, 'Country': True, 'RoundNumber': True, 'EventDate': True, 'Lat': False, 'Lon': False, 'Year': True},
-        custom_data=['Year', 'RoundNumber'],
-        color='Year',
-        projection='natural earth',
-        title="F1 Nagydíjak Helyszínei"
-    )
+    # Parse selected race
+    selected_year = None
+    selected_round = None
+    if selected_race:
+        try:
+            selected_year, selected_round = map(int, str(selected_race).split('_'))
+        except ValueError:
+            pass
+
+    for idx, row in df.iterrows():
+        # Add a button to select the race
+        select_js = f"window.top.location.hash = 'race={row['Year']}_{row['RoundNumber']}';"
+        popup_text = f"""
+        <div style="font-family: sans-serif; color: black;">
+            <b>{row['EventName']}</b><br>
+            Year: {row['Year']}<br>
+            Round: {row['RoundNumber']}<br>
+            Location: {row['Location']}, {row['Country']}<br>
+            Date: {row['EventDate']}<br>
+            <button onclick="{select_js}" style="margin-top: 5px; cursor: pointer; padding: 5px; background-color: #FF1801; color: white; border: none; border-radius: 3px;">Kiválasztás</button>
+        </div>
+        """
+        
+        # Check if this is the selected race
+        is_selected = False
+        if selected_year is not None and selected_round is not None:
+            if int(row['Year']) == selected_year and int(row['RoundNumber']) == selected_round:
+                is_selected = True
+        
+        chart_added = False
+        if is_selected:
+            # Generate Donut Chart SVG
+            try:
+                df_all_data, _ = get_data(selected_year)
+                if not df_all_data.empty:
+                    df_stints = df_all_data[df_all_data['RoundNumber'] == selected_round].copy()
+                    if not df_stints.empty:
+                        df_stints['Compound'] = df_stints['Compound'].astype(str).str.upper()
+                        df_agg = df_stints.groupby('Compound')['Duration'].sum().to_dict()
+                        
+                        base_colors = {
+                            'SOFT': '#FF3333', 'MEDIUM': '#FFF200', 'HARD': '#EBEBEB',
+                            'INTERMEDIATE': '#39B54A', 'WET': '#00AEEF', 'UNKNOWN': '#808080'
+                        }
+                        
+                        # SVG Generation
+                        radius = 40
+                        inner_radius = 20
+                        total = sum(df_agg.values())
+                        
+                        svg_parts = []
+                        size = radius * 2 + 4
+                        svg_parts.append(f'<svg width="{size}" height="{size}" viewBox="-{radius+2} -{radius+2} {size} {size}" style="transform: translate(-50%, -50%);">')
+                        
+                        start_angle = 0
+                        for compound, value in df_agg.items():
+                            if value <= 0: continue
+                            fraction = value / total
+                            end_angle = start_angle + fraction * 2 * math.pi
+                            
+                            # Coordinates (0 is up)
+                            x1_out = radius * math.sin(start_angle)
+                            y1_out = -radius * math.cos(start_angle)
+                            x2_out = radius * math.sin(end_angle)
+                            y2_out = -radius * math.cos(end_angle)
+                            
+                            x1_in = inner_radius * math.sin(start_angle)
+                            y1_in = -inner_radius * math.cos(start_angle)
+                            x2_in = inner_radius * math.sin(end_angle)
+                            y2_in = -inner_radius * math.cos(end_angle)
+                            
+                            large_arc = 1 if fraction > 0.5 else 0
+                            
+                            color = base_colors.get(compound, '#808080')
+                            
+                            if fraction > 0.999:
+                                # Full circle
+                                path = f'M 0 -{radius} A {radius} {radius} 0 1 1 0 {radius} A {radius} {radius} 0 1 1 0 -{radius} M 0 -{inner_radius} A {inner_radius} {inner_radius} 0 1 0 0 {inner_radius} A {inner_radius} {inner_radius} 0 1 0 0 -{inner_radius} Z'
+                                svg_parts.append(f'<path d="{path}" fill="{color}" stroke="none" fill-rule="evenodd" />')
+                            else:
+                                path = f'M {x1_out} {y1_out} A {radius} {radius} 0 {large_arc} 1 {x2_out} {y2_out} L {x2_in} {y2_in} A {inner_radius} {inner_radius} 0 {large_arc} 0 {x1_in} {y1_in} Z'
+                                svg_parts.append(f'<path d="{path}" fill="{color}" stroke="none" />')
+                            
+                            start_angle = end_angle
+                            
+                        # Center Red Dot
+                        svg_parts.append(f'<circle cx="0" cy="0" r="{inner_radius-5}" fill="#FF1801" stroke="white" stroke-width="2" />')
+                        svg_parts.append('</svg>')
+                        
+                        svg_icon = "".join(svg_parts)
+                        
+                        folium.Marker(
+                            location=[row['Lat'], row['Lon']],
+                            icon=folium.DivIcon(html=svg_icon, icon_size=(size, size), icon_anchor=(size/2, size/2)),
+                            popup=folium.Popup(popup_text, max_width=300),
+                            tooltip=f"{row['EventName']} ({row['Year']})"
+                        ).add_to(m)
+                        chart_added = True
+            except Exception as e:
+                print(f"Error generating map chart: {e}")
+
+        if not chart_added:
+            folium.CircleMarker(
+                location=[row['Lat'], row['Lon']],
+                radius=6,
+                popup=folium.Popup(popup_text, max_width=300),
+                tooltip=f"{row['EventName']} ({row['Year']})",
+                color="#FF1801", # F1 Red
+                fill=True,
+                fill_color="#FF1801",
+                fill_opacity=0.7
+            ).add_to(m)
     
-    fig.update_geos(
-        visible=True, resolution=110,
-        showcountries=True, countrycolor="#555",
-        showcoastlines=True, coastlinecolor="#555",
-        showland=True, landcolor="#222",
-        showocean=True, oceancolor="#121212",
-        bgcolor='#121212'
-    )
-    
-    fig.update_traces(marker=dict(size=10, line=dict(width=1, color='white')))
-    
-    fig.update_layout(
-        template='plotly_dark',
-        margin=dict(l=0, r=0, t=50, b=0),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        height=600,
-        legend=dict(title='Év'),
-        clickmode='event+select'
-    )
-    return fig
+    return m
 
 def create_tire_distribution_chart(race_value, year_selector_value):
     """Létrehozza a gumihasználat kördiagramját (Donut Chart)."""
@@ -786,6 +874,8 @@ def render_selected_plot(choice, selected_drivers, selected_races, selected_team
         elif choice == 'Köridők':
             race_val = races[0] if isinstance(races, (list, tuple)) and races else None
             return create_lap_dist_graph(race_val, drivers, teams, years)
+        elif choice == 'Térkép':
+            return create_map_graph(years)
         else:
             return go.Figure().update_layout(title="Ismeretlen diagram típus.", template='plotly_dark')
     except Exception as e:
@@ -1041,14 +1131,14 @@ map_race_layout, map_race_select = create_dropdown_checkbox('🏁 Futam (Kördia
 
 # 8. Compare
 # Left
-comp_left_choice_layout, comp_left_choice = create_dropdown_checkbox("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők'], ['Bajnokság'])
+comp_left_choice_layout, comp_left_choice = create_dropdown_checkbox("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők', 'Térkép'], ['Bajnokság'])
 comp_left_year_layout, comp_left_year = create_dropdown_checkbox('📅 Év', [y for y in range(2021, 2025)], [DEFAULT_YEAR])
 comp_left_race_layout, comp_left_race = create_dropdown_checkbox('🏁 Futam', INIT_RACE_OPTIONS, INIT_RACE_VALUES)
 comp_left_team_layout, comp_left_team = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
 comp_left_driver_layout, comp_left_driver = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
 
 # Right
-comp_right_choice_layout, comp_right_choice = create_dropdown_checkbox("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők'], ['Verseny'])
+comp_right_choice_layout, comp_right_choice = create_dropdown_checkbox("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők', 'Térkép'], ['Verseny'])
 comp_right_year_layout, comp_right_year = create_dropdown_checkbox('📅 Év', [y for y in range(2021, 2025)], [DEFAULT_YEAR])
 comp_right_race_layout, comp_right_race = create_dropdown_checkbox('🏁 Futam', INIT_RACE_OPTIONS, INIT_RACE_VALUES)
 comp_right_team_layout, comp_right_team = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
@@ -1137,26 +1227,30 @@ gain_plot = pn.bind(create_gain_loss_graph, gain_driver_select, gain_race_select
 lap_plot = pn.bind(create_lap_dist_graph, lap_race_select, lap_driver_select, lap_team_select, year_selector)
 
 # 7. Map
-map_plot = pn.bind(create_map_graph, year_selector)
+map_plot = pn.bind(create_map_graph, year_selector, map_race_select)
 
 # Map Pane with Click Listener
-map_pane = pn.pane.Plotly(map_plot, sizing_mode='stretch_both', height=600)
+map_pane = pn.pane.plot.Folium(map_plot, sizing_mode='stretch_both', height=600)
 
-def on_map_click(event):
-    if event.new and 'points' in event.new:
+def on_hash_change(event):
+    if not event.new: return
+    hash_val = event.new
+    if 'race=' in hash_val:
         try:
-            point = event.new['points'][0]
-            # customdata is usually a list [Year, RoundNumber]
-            cdata = point.get('customdata', [])
-            if len(cdata) >= 2:
-                y, r = cdata[0], cdata[1]
-                val = f"{y}_{r}"
-                # Update the selector
-                map_race_select.value = [val]
+            val = hash_val.split('race=')[1]
+            # Clean up if there are other params
+            val = val.split('&')[0]
+            # Update the selector
+            map_race_select.value = [val]
         except Exception as e:
-            print(f"Click error: {e}")
+            print(f"Hash error: {e}")
 
-map_pane.param.watch(on_map_click, 'click_data')
+# Watch for URL hash changes to handle map popup clicks
+def hook_location():
+    if pn.state.location:
+        pn.state.location.param.watch(on_hash_change, 'hash')
+
+pn.state.onload(hook_location)
 
 map_pie_plot = pn.bind(create_tire_distribution_chart, map_race_select, year_selector)
 
@@ -1237,7 +1331,7 @@ tab_compare = pn.Row(
             css_classes=['widget-box']
         ),
         pn.Column(
-            pn.pane.Plotly(comp_left_plot, sizing_mode='stretch_width', height=450),
+            pn.panel(comp_left_plot, sizing_mode='stretch_width', height=450),
             css_classes=['card-box']
         ),
         sizing_mode='stretch_width', margin=10
@@ -1249,7 +1343,7 @@ tab_compare = pn.Row(
             css_classes=['widget-box']
         ),
         pn.Column(
-            pn.pane.Plotly(comp_right_plot, sizing_mode='stretch_width', height=450),
+            pn.panel(comp_right_plot, sizing_mode='stretch_width', height=450),
             css_classes=['card-box']
         ),
         sizing_mode='stretch_width', margin=10
