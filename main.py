@@ -1098,13 +1098,129 @@ def create_dropdown_checkbox(name, options, value):
     
     return widget_layout, state_widget
 
+# Helper for Single Select Dropdown
+def create_single_select_dropdown(name, options, value):
+    # Ensure value is valid
+    if value is None and options:
+        # Pick first option
+        if isinstance(options, list):
+            value = options[0]
+        elif isinstance(options, dict):
+            value = list(options.values())[0]
+    
+    # 1. The "Source of Truth" widget (hidden)
+    state_widget = pn.widgets.Select(name='state', options=options, value=value, visible=False)
+    
+    # 2. The UI widgets
+    search_box = pn.widgets.TextInput(placeholder="Keresés...", sizing_mode='stretch_width', margin=(0, 0, 5, 0))
+    
+    # Helper to normalize options for filtering
+    def get_opts_dict(opts):
+        if isinstance(opts, list):
+            return {str(v): v for v in opts}
+        return opts
+
+    opts_dict = get_opts_dict(options)
+        
+    # Initial RadioBoxGroup options (all)
+    rbg = pn.widgets.RadioBoxGroup(name='', options=options, value=value, sizing_mode='stretch_width')
+    
+    # Toggle Button
+    btn = pn.widgets.Button(name=f"{name}: {value} ▼", button_type='default', css_classes=['dropdown-btn'])
+    
+    # Container
+    container = pn.Column(search_box, rbg, visible=False, max_height=300, scroll=True, css_classes=['dropdown-box'], sizing_mode='stretch_width')
+    
+    # Logic flags
+    is_updating_rbg = False
+    
+    def toggle(event):
+        container.visible = not container.visible
+        icon = "▲" if container.visible else "▼"
+        btn.name = f"{name}: {state_widget.value} {icon}"
+        
+    def on_search(event):
+        nonlocal is_updating_rbg
+        term = event.new.lower() if event.new else ""
+        
+        # Filter options
+        if not term:
+            new_opts = state_widget.options # Restore full options from state
+        else:
+            # Filter keys in opts_dict
+            new_opts = {k: v for k, v in opts_dict.items() if term in str(k).lower()}
+        
+        is_updating_rbg = True
+        rbg.options = new_opts
+        
+        # Update rbg value to match state_widget but only for visible options
+        allowed_values = list(new_opts.values()) if isinstance(new_opts, dict) else new_opts
+        
+        if state_widget.value in allowed_values:
+            rbg.value = state_widget.value
+        
+        is_updating_rbg = False
+        
+    def on_rbg_change(event):
+        nonlocal is_updating_rbg
+        if is_updating_rbg: return
+        
+        # User clicked a radio button -> Update state_widget.value
+        new_val = event.new
+        
+        # Update state widget
+        state_widget.value = new_val
+        
+        # Update button label and close
+        btn.name = f"{name}: {new_val} ▼"
+        container.visible = False
+
+    # Watchers
+    btn.on_click(toggle)
+    search_box.param.watch(on_search, 'value')
+    rbg.param.watch(on_rbg_change, 'value')
+    
+    # Watch state_widget changes (external updates)
+    def on_state_change(event):
+        # Update button label
+        icon = "▲" if container.visible else "▼"
+        btn.name = f"{name}: {event.new} {icon}"
+        
+        # Update rbg value if needed
+        current_visible_opts = rbg.options
+        visible_values = list(current_visible_opts.values()) if isinstance(current_visible_opts, dict) else current_visible_opts
+        
+        if event.new in visible_values:
+            nonlocal is_updating_rbg
+            is_updating_rbg = True
+            rbg.value = event.new
+            is_updating_rbg = False
+            
+    state_widget.param.watch(on_state_change, 'value')
+    
+    # Watch options changes on state_widget
+    def on_options_change(event):
+        nonlocal opts_dict
+        new_options = event.new
+        opts_dict = get_opts_dict(new_options)
+        
+        # Re-apply search filter (which updates rbg.options)
+        on_search(type('obj', (object,), {'new': search_box.value})())
+        
+    state_widget.param.watch(on_options_change, 'options')
+
+    # Layout
+    widget_layout = pn.Column(pn.pane.Markdown(f"**{name}**"), btn, container, sizing_mode='stretch_width')
+    
+    return widget_layout, state_widget
+
 # Global Year Selector
 year_layout, year_selector = create_dropdown_checkbox('📅 Szezon Kiválasztása', [y for y in range(2021, 2025)], [DEFAULT_YEAR])
 
 # --- Widgets for each tab ---
 
 # 1. Gumistratégiák
-tire_race_layout, tire_race_select = create_dropdown_checkbox('🏁 Futam', INIT_RACE_OPTIONS, [INIT_RACE_VALUES[0]] if INIT_RACE_VALUES else [])
+tire_race_layout, tire_race_select = create_single_select_dropdown('🏁 Futam', INIT_RACE_OPTIONS, INIT_RACE_VALUES[0] if INIT_RACE_VALUES else None)
 
 # 2. Kvalifikáció
 qual_team_layout, qual_team_select = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
@@ -1131,18 +1247,18 @@ lap_team_layout, lap_team_select = create_dropdown_checkbox('🏎️ Csapat', IN
 lap_driver_layout, lap_driver_select = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
 
 # 7. Map
-map_race_layout, map_race_select = create_dropdown_checkbox('🏁 Futam (Kördiagram)', INIT_RACE_OPTIONS, [INIT_RACE_VALUES[0]] if INIT_RACE_VALUES else [])
+map_race_layout, map_race_select = create_single_select_dropdown('🏁 Futam (Kördiagram)', INIT_RACE_OPTIONS, INIT_RACE_VALUES[0] if INIT_RACE_VALUES else None)
 
 # 8. Compare
 # Left
-comp_left_choice_layout, comp_left_choice = create_dropdown_checkbox("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők', 'Térkép'], ['Bajnokság'])
+comp_left_choice_layout, comp_left_choice = create_single_select_dropdown("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők', 'Térkép'], 'Bajnokság')
 comp_left_year_layout, comp_left_year = create_dropdown_checkbox('📅 Év', [y for y in range(2021, 2025)], [DEFAULT_YEAR])
 comp_left_race_layout, comp_left_race = create_dropdown_checkbox('🏁 Futam', INIT_RACE_OPTIONS, INIT_RACE_VALUES)
 comp_left_team_layout, comp_left_team = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
 comp_left_driver_layout, comp_left_driver = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
 
 # Right
-comp_right_choice_layout, comp_right_choice = create_dropdown_checkbox("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők', 'Térkép'], ['Verseny'])
+comp_right_choice_layout, comp_right_choice = create_single_select_dropdown("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők', 'Térkép'], 'Verseny')
 comp_right_year_layout, comp_right_year = create_dropdown_checkbox('📅 Év', [y for y in range(2021, 2025)], [DEFAULT_YEAR])
 comp_right_race_layout, comp_right_race = create_dropdown_checkbox('🏁 Futam', INIT_RACE_OPTIONS, INIT_RACE_VALUES)
 comp_right_team_layout, comp_right_team = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
