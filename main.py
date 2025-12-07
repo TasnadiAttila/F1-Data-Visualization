@@ -632,7 +632,7 @@ def create_lap_dist_graph(race_value, selected_drivers, selected_teams, years):
     except Exception as e:
         return go.Figure().update_layout(title=f"Hiba az adatok betöltésekor: {str(e)}", template='plotly_dark')
 
-def create_map_graph(years, selected_race=None):
+def create_map_graph(years, selected_race=None, target_hash_prefix='race'):
     """Létrehozza a világtérképet a futamhelyszínekkel (Folium)."""
     if not isinstance(years, list): years = [years]
     
@@ -674,7 +674,7 @@ def create_map_graph(years, selected_race=None):
 
     for idx, row in df.iterrows():
         # Add a button to select the race
-        select_js = f"window.top.location.hash = 'race={row['Year']}_{row['RoundNumber']}';"
+        select_js = f"window.top.location.hash = '{target_hash_prefix}={row['Year']}_{row['RoundNumber']}';"
         popup_text = f"""
         <div style="font-family: sans-serif; color: black;">
             <b>{row['EventName']}</b><br>
@@ -842,7 +842,7 @@ def create_tire_distribution_chart(race_value, year_selector_value):
     
     return fig
 
-def render_selected_plot(choice, selected_drivers, selected_races, selected_teams, years):
+def render_selected_plot(choice, selected_drivers, selected_races, selected_teams, years, side=None):
     """Generic renderer for the compare view."""
     # Handle list input from CheckBoxGroup (take first selected)
     if isinstance(choice, list):
@@ -875,7 +875,11 @@ def render_selected_plot(choice, selected_drivers, selected_races, selected_team
             race_val = races[0] if isinstance(races, (list, tuple)) and races else None
             return create_lap_dist_graph(race_val, drivers, teams, years)
         elif choice == 'Térkép':
-            return create_map_graph(years)
+            race_val = races[0] if isinstance(races, (list, tuple)) and races else None
+            prefix = 'race'
+            if side == 'left': prefix = 'race_left'
+            elif side == 'right': prefix = 'race_right'
+            return create_map_graph(years, race_val, target_hash_prefix=prefix)
         else:
             return go.Figure().update_layout(title="Ismeretlen diagram típus.", template='plotly_dark')
     except Exception as e:
@@ -1235,15 +1239,24 @@ map_pane = pn.pane.plot.Folium(map_plot, sizing_mode='stretch_both', height=600)
 def on_hash_change(event):
     if not event.new: return
     hash_val = event.new
-    if 'race=' in hash_val:
-        try:
-            val = hash_val.split('race=')[1]
-            # Clean up if there are other params
-            val = val.split('&')[0]
-            # Update the selector
-            map_race_select.value = [val]
-        except Exception as e:
-            print(f"Hash error: {e}")
+    
+    # Helper to extract value
+    def extract_val(h, key):
+        if key + '=' in h:
+            try:
+                val = h.split(key + '=')[1].split('&')[0]
+                return val
+            except: return None
+        return None
+
+    val = extract_val(hash_val, 'race')
+    if val: map_race_select.value = [val]
+
+    val_left = extract_val(hash_val, 'race_left')
+    if val_left: comp_left_race.value = [val_left]
+
+    val_right = extract_val(hash_val, 'race_right')
+    if val_right: comp_right_race.value = [val_right]
 
 # Watch for URL hash changes to handle map popup clicks
 def hook_location():
@@ -1255,8 +1268,8 @@ pn.state.onload(hook_location)
 map_pie_plot = pn.bind(create_tire_distribution_chart, map_race_select, year_selector)
 
 # 8. Compare
-comp_left_plot = pn.bind(render_selected_plot, comp_left_choice, comp_left_driver, comp_left_race, comp_left_team, comp_left_year)
-comp_right_plot = pn.bind(render_selected_plot, comp_right_choice, comp_right_driver, comp_right_race, comp_right_team, comp_right_year)
+comp_left_plot = pn.bind(render_selected_plot, comp_left_choice, comp_left_driver, comp_left_race, comp_left_team, comp_left_year, side='left')
+comp_right_plot = pn.bind(render_selected_plot, comp_right_choice, comp_right_driver, comp_right_race, comp_right_team, comp_right_year, side='right')
 
 
 # --- Layout Construction ---
