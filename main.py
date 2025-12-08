@@ -745,6 +745,15 @@ def create_map_graph(years, selected_race=None, target_hash_prefix='race'):
                                 path = f'M {x1_out} {y1_out} A {radius} {radius} 0 {large_arc} 1 {x2_out} {y2_out} L {x2_in} {y2_in} A {inner_radius} {inner_radius} 0 {large_arc} 0 {x1_in} {y1_in} Z'
                                 svg_parts.append(f'<path d="{path}" fill="{color}" stroke="none" />')
                             
+                            # Add Percentage Text
+                            if fraction > 0.08: # Only show if slice is big enough
+                                mid_angle = (start_angle + end_angle) / 2
+                                text_r = (radius + inner_radius) / 2
+                                tx = text_r * math.sin(mid_angle)
+                                ty = -text_r * math.cos(mid_angle)
+                                pct = int(round(fraction * 100))
+                                svg_parts.append(f'<text x="{tx}" y="{ty}" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="10" font-family="sans-serif" font-weight="bold" style="text-shadow: 1px 1px 2px black;">{pct}%</text>')
+
                             start_angle = end_angle
                             
                         # Center Red Dot
@@ -878,7 +887,10 @@ def render_selected_plot(choice, selected_drivers, selected_races, selected_team
             prefix = 'race'
             if side == 'left': prefix = 'race_left'
             elif side == 'right': prefix = 'race_right'
-            return create_map_graph(years, race_val, target_hash_prefix=prefix)
+            
+            map_obj = create_map_graph(years, race_val, target_hash_prefix=prefix)
+            
+            return pn.pane.plot.Folium(map_obj, sizing_mode='stretch_width', height=450)
         else:
             return go.Figure().update_layout(title="Ismeretlen diagram típus.", template='plotly_dark')
     except Exception as e:
@@ -1375,7 +1387,7 @@ lap_plot = pn.bind(create_lap_dist_graph, lap_race_select, lap_driver_select, la
 map_plot = pn.bind(create_map_graph, year_selector, map_race_select)
 
 # Map Pane with Click Listener
-map_pane = pn.pane.plot.Folium(map_plot, sizing_mode='stretch_both', height=600)
+map_pane = pn.pane.plot.Folium(map_plot, sizing_mode='stretch_width', height=450)
 
 def on_hash_change(event):
     if not event.new: return
