@@ -1,3 +1,2 @@
-- Fisrt you need to run this command: pip install -r requirements.txt
 - All data credit to: https://docs.fastf1.dev/#
 - python -m panel serve main.py --show --autoreload
