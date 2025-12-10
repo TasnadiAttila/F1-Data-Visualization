@@ -692,85 +692,87 @@ def create_map_graph(years, selected_race=None, target_hash_prefix='race'):
                 is_selected = True
         
         chart_added = False
-        if is_selected:
-            # Generate Donut Chart SVG
-            try:
-                df_all_data, _ = get_data(selected_year)
-                if not df_all_data.empty:
-                    df_stints = df_all_data[df_all_data['RoundNumber'] == selected_round].copy()
-                    if not df_stints.empty:
-                        df_stints['Compound'] = df_stints['Compound'].astype(str).str.upper()
-                        df_agg = df_stints.groupby('Compound')['Duration'].sum().to_dict()
+        # Generate Donut Chart SVG for ALL races
+        try:
+            current_year = int(row['Year'])
+            current_round = int(row['RoundNumber'])
+            
+            df_all_data, _ = get_data(current_year)
+            if not df_all_data.empty:
+                df_stints = df_all_data[df_all_data['RoundNumber'] == current_round].copy()
+                if not df_stints.empty:
+                    df_stints['Compound'] = df_stints['Compound'].astype(str).str.upper()
+                    df_agg = df_stints.groupby('Compound')['Duration'].sum().to_dict()
+                    
+                    base_colors = {
+                        'SOFT': '#FF3333', 'MEDIUM': '#FFF200', 'HARD': '#EBEBEB',
+                        'INTERMEDIATE': '#39B54A', 'WET': '#00AEEF', 'UNKNOWN': '#808080'
+                    }
+                    
+                    # SVG Generation
+                    radius = 40
+                    inner_radius = 20
+                    total = sum(df_agg.values())
+                    
+                    svg_parts = []
+                    size = radius * 2 + 4
+                    svg_parts.append(f'<svg width="{size}" height="{size}" viewBox="-{radius+2} -{radius+2} {size} {size}" style="transform: translate(-50%, -50%);">')
+                    
+                    start_angle = 0
+                    for compound, value in df_agg.items():
+                        if value <= 0: continue
+                        fraction = value / total
+                        end_angle = start_angle + fraction * 2 * math.pi
                         
-                        base_colors = {
-                            'SOFT': '#FF3333', 'MEDIUM': '#FFF200', 'HARD': '#EBEBEB',
-                            'INTERMEDIATE': '#39B54A', 'WET': '#00AEEF', 'UNKNOWN': '#808080'
-                        }
+                        # Coordinates (0 is up)
+                        x1_out = radius * math.sin(start_angle)
+                        y1_out = -radius * math.cos(start_angle)
+                        x2_out = radius * math.sin(end_angle)
+                        y2_out = -radius * math.cos(end_angle)
                         
-                        # SVG Generation
-                        radius = 40
-                        inner_radius = 20
-                        total = sum(df_agg.values())
+                        x1_in = inner_radius * math.sin(start_angle)
+                        y1_in = -inner_radius * math.cos(start_angle)
+                        x2_in = inner_radius * math.sin(end_angle)
+                        y2_in = -inner_radius * math.cos(end_angle)
                         
-                        svg_parts = []
-                        size = radius * 2 + 4
-                        svg_parts.append(f'<svg width="{size}" height="{size}" viewBox="-{radius+2} -{radius+2} {size} {size}" style="transform: translate(-50%, -50%);">')
+                        large_arc = 1 if fraction > 0.5 else 0
                         
-                        start_angle = 0
-                        for compound, value in df_agg.items():
-                            if value <= 0: continue
-                            fraction = value / total
-                            end_angle = start_angle + fraction * 2 * math.pi
-                            
-                            # Coordinates (0 is up)
-                            x1_out = radius * math.sin(start_angle)
-                            y1_out = -radius * math.cos(start_angle)
-                            x2_out = radius * math.sin(end_angle)
-                            y2_out = -radius * math.cos(end_angle)
-                            
-                            x1_in = inner_radius * math.sin(start_angle)
-                            y1_in = -inner_radius * math.cos(start_angle)
-                            x2_in = inner_radius * math.sin(end_angle)
-                            y2_in = -inner_radius * math.cos(end_angle)
-                            
-                            large_arc = 1 if fraction > 0.5 else 0
-                            
-                            color = base_colors.get(compound, '#808080')
-                            
-                            if fraction > 0.999:
-                                # Full circle
-                                path = f'M 0 -{radius} A {radius} {radius} 0 1 1 0 {radius} A {radius} {radius} 0 1 1 0 -{radius} M 0 -{inner_radius} A {inner_radius} {inner_radius} 0 1 0 0 {inner_radius} A {inner_radius} {inner_radius} 0 1 0 0 -{inner_radius} Z'
-                                svg_parts.append(f'<path d="{path}" fill="{color}" stroke="none" fill-rule="evenodd" />')
-                            else:
-                                path = f'M {x1_out} {y1_out} A {radius} {radius} 0 {large_arc} 1 {x2_out} {y2_out} L {x2_in} {y2_in} A {inner_radius} {inner_radius} 0 {large_arc} 0 {x1_in} {y1_in} Z'
-                                svg_parts.append(f'<path d="{path}" fill="{color}" stroke="none" />')
-                            
-                            # Add Percentage Text
-                            if fraction > 0.08: # Only show if slice is big enough
-                                mid_angle = (start_angle + end_angle) / 2
-                                text_r = (radius + inner_radius) / 2
-                                tx = text_r * math.sin(mid_angle)
-                                ty = -text_r * math.cos(mid_angle)
-                                pct = int(round(fraction * 100))
-                                svg_parts.append(f'<text x="{tx}" y="{ty}" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="10" font-family="sans-serif" font-weight="bold" style="text-shadow: 1px 1px 2px black;">{pct}%</text>')
+                        color = base_colors.get(compound, '#808080')
+                        
+                        if fraction > 0.999:
+                            # Full circle
+                            path = f'M 0 -{radius} A {radius} {radius} 0 1 1 0 {radius} A {radius} {radius} 0 1 1 0 -{radius} M 0 -{inner_radius} A {inner_radius} {inner_radius} 0 1 0 0 {inner_radius} A {inner_radius} {inner_radius} 0 1 0 0 -{inner_radius} Z'
+                            svg_parts.append(f'<path d="{path}" fill="{color}" stroke="none" fill-rule="evenodd" />')
+                        else:
+                            path = f'M {x1_out} {y1_out} A {radius} {radius} 0 {large_arc} 1 {x2_out} {y2_out} L {x2_in} {y2_in} A {inner_radius} {inner_radius} 0 {large_arc} 0 {x1_in} {y1_in} Z'
+                            svg_parts.append(f'<path d="{path}" fill="{color}" stroke="none" />')
+                        
+                        # Add Percentage Text
+                        if fraction > 0.08: # Only show if slice is big enough
+                            mid_angle = (start_angle + end_angle) / 2
+                            text_r = (radius + inner_radius) / 2
+                            tx = text_r * math.sin(mid_angle)
+                            ty = -text_r * math.cos(mid_angle)
+                            pct = int(round(fraction * 100))
+                            svg_parts.append(f'<text x="{tx}" y="{ty}" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="10" font-family="sans-serif" font-weight="bold" style="text-shadow: 1px 1px 2px black;">{pct}%</text>')
 
-                            start_angle = end_angle
-                            
-                        # Center Red Dot
-                        svg_parts.append(f'<circle cx="0" cy="0" r="{inner_radius-5}" fill="#FF1801" stroke="white" stroke-width="2" />')
-                        svg_parts.append('</svg>')
+                        start_angle = end_angle
                         
-                        svg_icon = "".join(svg_parts)
-                        
-                        folium.Marker(
-                            location=[row['Lat'], row['Lon']],
-                            icon=folium.DivIcon(html=svg_icon, icon_size=(size, size), icon_anchor=(size/2, size/2)),
-                            popup=folium.Popup(popup_text, max_width=300),
-                            tooltip=f"{row['EventName']} ({row['Year']})"
-                        ).add_to(m)
-                        chart_added = True
-            except Exception as e:
-                print(f"Error generating map chart: {e}")
+                    # Center Red Dot
+                    svg_parts.append(f'<circle cx="0" cy="0" r="{inner_radius-5}" fill="#FF1801" stroke="white" stroke-width="2" />')
+                    svg_parts.append('</svg>')
+                    
+                    svg_icon = "".join(svg_parts)
+                    
+                    folium.Marker(
+                        location=[row['Lat'], row['Lon']],
+                        icon=folium.DivIcon(html=svg_icon, icon_size=(size, size), icon_anchor=(size/2, size/2)),
+                        popup=folium.Popup(popup_text, max_width=300),
+                        tooltip=f"{row['EventName']} ({row['Year']})"
+                    ).add_to(m)
+                    chart_added = True
+        except Exception as e:
+            print(f"Error generating map chart: {e}")
 
         if not chart_added:
             folium.CircleMarker(
@@ -850,7 +852,33 @@ def create_tire_distribution_chart(race_value, year_selector_value):
     
     return fig
 
-def render_selected_plot(choice, selected_drivers, selected_races, selected_teams, years, side=None):
+LEGEND_HTML = """
+<div style="background-color: #2f2f2f; padding: 15px; border-radius: 5px; color: white;">
+    <h4 style="margin-top: 0;">Jelmagyarázat</h4>
+    <div style="display: flex; align-items: center; margin-bottom: 5px;">
+        <span style="display: inline-block; width: 15px; height: 15px; background-color: #FF3333; margin-right: 10px; border-radius: 50%;"></span>
+        <span>Soft (Lágy)</span>
+    </div>
+    <div style="display: flex; align-items: center; margin-bottom: 5px;">
+        <span style="display: inline-block; width: 15px; height: 15px; background-color: #FFF200; margin-right: 10px; border-radius: 50%;"></span>
+        <span>Medium (Közepes)</span>
+    </div>
+    <div style="display: flex; align-items: center; margin-bottom: 5px;">
+        <span style="display: inline-block; width: 15px; height: 15px; background-color: #EBEBEB; margin-right: 10px; border-radius: 50%;"></span>
+        <span>Hard (Kemény)</span>
+    </div>
+    <div style="display: flex; align-items: center; margin-bottom: 5px;">
+        <span style="display: inline-block; width: 15px; height: 15px; background-color: #39B54A; margin-right: 10px; border-radius: 50%;"></span>
+        <span>Intermediate (Átmeneti)</span>
+    </div>
+    <div style="display: flex; align-items: center; margin-bottom: 5px;">
+        <span style="display: inline-block; width: 15px; height: 15px; background-color: #00AEEF; margin-right: 10px; border-radius: 50%;"></span>
+        <span>Wet (Eső)</span>
+    </div>
+</div>
+"""
+
+def render_selected_plot(choice, selected_drivers, selected_races, selected_teams, years, single_year=None, side=None):
     """Generic renderer for the compare view."""
     # Handle list input from CheckBoxGroup (take first selected)
     if isinstance(choice, list):
@@ -858,6 +886,12 @@ def render_selected_plot(choice, selected_drivers, selected_races, selected_team
 
     if not choice:
         return go.Figure().update_layout(title="Válassz diagram típust", template='plotly_dark')
+
+    # If Map is selected, use single_year instead of years list
+    if choice == 'Térkép':
+        if single_year:
+            years = [single_year]
+        # If single_year is None (e.g. not initialized), keep years as is or default
 
     if not isinstance(years, list):
         years = [years] if years is not None else [DEFAULT_YEAR]
@@ -890,7 +924,16 @@ def render_selected_plot(choice, selected_drivers, selected_races, selected_team
             
             map_obj = create_map_graph(years, race_val, target_hash_prefix=prefix)
             
-            return pn.pane.plot.Folium(map_obj, sizing_mode='stretch_width', height=450)
+            # Pie chart for selected race
+            current_year = years[0] if years else DEFAULT_YEAR
+            pie_chart = create_tire_distribution_chart(race_val, current_year)
+            
+            return pn.Column(
+                pn.pane.plot.Folium(map_obj, sizing_mode='stretch_width', height=450),
+                pn.pane.HTML(LEGEND_HTML, sizing_mode='stretch_width'),
+                pn.pane.Markdown("### 🍩 Kiválasztott Futam"),
+                pn.pane.Plotly(pie_chart, sizing_mode='stretch_width', height=300)
+            )
         else:
             return go.Figure().update_layout(title="Ismeretlen diagram típus.", template='plotly_dark')
     except Exception as e:
@@ -1285,11 +1328,15 @@ lap_driver_layout, lap_driver_select = create_dropdown_checkbox('👤 Versenyző
 
 # 7. Map
 map_race_layout, map_race_select = create_single_select_dropdown('🏁 Futam (Kördiagram)', INIT_RACE_OPTIONS, INIT_RACE_VALUES[0] if INIT_RACE_VALUES else None)
+map_year_layout, map_year_select = create_single_select_dropdown('📅 Év', [DEFAULT_YEAR], DEFAULT_YEAR)
 
 # 8. Compare
 # Left
 comp_left_choice_layout, comp_left_choice = create_single_select_dropdown("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők', 'Térkép'], 'Bajnokság')
 comp_left_year_layout, comp_left_year = create_dropdown_checkbox('📅 Év', [y for y in range(2021, 2025)], [DEFAULT_YEAR])
+comp_left_year_single_layout, comp_left_year_single = create_single_select_dropdown('📅 Év', [y for y in range(2021, 2025)], DEFAULT_YEAR)
+comp_left_year_single_layout.visible = False # Hidden by default
+
 comp_left_race_layout, comp_left_race = create_dropdown_checkbox('🏁 Futam', INIT_RACE_OPTIONS, INIT_RACE_VALUES)
 comp_left_team_layout, comp_left_team = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
 comp_left_driver_layout, comp_left_driver = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
@@ -1297,6 +1344,9 @@ comp_left_driver_layout, comp_left_driver = create_dropdown_checkbox('👤 Verse
 # Right
 comp_right_choice_layout, comp_right_choice = create_single_select_dropdown("📊 Diagram Típus", ['Gumistratégiák', 'Kvalifikáció', 'Verseny', 'Bajnokság', 'Pozíció Változás', 'Köridők', 'Térkép'], 'Verseny')
 comp_right_year_layout, comp_right_year = create_dropdown_checkbox('📅 Év', [y for y in range(2021, 2025)], [DEFAULT_YEAR])
+comp_right_year_single_layout, comp_right_year_single = create_single_select_dropdown('📅 Év', [y for y in range(2021, 2025)], DEFAULT_YEAR)
+comp_right_year_single_layout.visible = False # Hidden by default
+
 comp_right_race_layout, comp_right_race = create_dropdown_checkbox('🏁 Futam', INIT_RACE_OPTIONS, INIT_RACE_VALUES)
 comp_right_team_layout, comp_right_team = create_dropdown_checkbox('🏎️ Csapat', INIT_TEAM_OPTIONS, [])
 comp_right_driver_layout, comp_right_driver = create_dropdown_checkbox('👤 Versenyző', INIT_DRIVER_OPTIONS, [])
@@ -1339,6 +1389,11 @@ def update_widgets_options(years, *widgets_groups):
 
 def on_year_change(event):
     years = event.new
+    # Update map year selector options
+    map_year_select.options = years
+    if years and map_year_select.value not in years:
+        map_year_select.value = years[0]
+
     # Update main tabs widgets
     update_widgets_options(years, 
         (tire_race_select, None, None),
@@ -1362,6 +1417,43 @@ def on_comp_right_year_change(event):
 comp_left_year.param.watch(on_comp_left_year_change, 'value')
 comp_right_year.param.watch(on_comp_right_year_change, 'value')
 
+# Logic to toggle widgets based on chart type
+def update_compare_ui_left(event):
+    choice = event.new
+    is_map = (choice == 'Térkép')
+    
+    # Toggle Year Selectors
+    comp_left_year_layout.visible = not is_map
+    comp_left_year_single_layout.visible = is_map
+    
+    # Disable/Enable others (by disabling the button inside the layout)
+    # Layout structure: Column(Markdown, Button, Container) -> Index 1 is Button
+    try:
+        comp_left_race_layout[1].disabled = is_map
+        comp_left_team_layout[1].disabled = is_map
+        comp_left_driver_layout[1].disabled = is_map
+    except:
+        pass # Fallback if structure changes
+
+def update_compare_ui_right(event):
+    choice = event.new
+    is_map = (choice == 'Térkép')
+    
+    # Toggle Year Selectors
+    comp_right_year_layout.visible = not is_map
+    comp_right_year_single_layout.visible = is_map
+    
+    # Disable/Enable others
+    try:
+        comp_right_race_layout[1].disabled = is_map
+        comp_right_team_layout[1].disabled = is_map
+        comp_right_driver_layout[1].disabled = is_map
+    except:
+        pass
+
+comp_left_choice.param.watch(update_compare_ui_left, 'value')
+comp_right_choice.param.watch(update_compare_ui_right, 'value')
+
 
 # --- Plot Bindings ---
 
@@ -1384,7 +1476,7 @@ gain_plot = pn.bind(create_gain_loss_graph, gain_driver_select, gain_race_select
 lap_plot = pn.bind(create_lap_dist_graph, lap_race_select, lap_driver_select, lap_team_select, year_selector)
 
 # 7. Map
-map_plot = pn.bind(create_map_graph, year_selector, map_race_select)
+map_plot = pn.bind(create_map_graph, map_year_select, map_race_select)
 
 # Map Pane with Click Listener
 map_pane = pn.pane.plot.Folium(map_plot, sizing_mode='stretch_width', height=450)
@@ -1403,7 +1495,7 @@ def on_hash_change(event):
         return None
 
     val = extract_val(hash_val, 'race')
-    if val: map_race_select.value = [val]
+    if val: map_race_select.value = val
 
     val_left = extract_val(hash_val, 'race_left')
     if val_left: comp_left_race.value = [val_left]
@@ -1418,11 +1510,11 @@ def hook_location():
 
 pn.state.onload(hook_location)
 
-map_pie_plot = pn.bind(create_tire_distribution_chart, map_race_select, year_selector)
+map_pie_plot = pn.bind(create_tire_distribution_chart, map_race_select, map_year_select)
 
 # 8. Compare
-comp_left_plot = pn.bind(render_selected_plot, comp_left_choice, comp_left_driver, comp_left_race, comp_left_team, comp_left_year, side='left')
-comp_right_plot = pn.bind(render_selected_plot, comp_right_choice, comp_right_driver, comp_right_race, comp_right_team, comp_right_year, side='right')
+comp_left_plot = pn.bind(render_selected_plot, comp_left_choice, comp_left_driver, comp_left_race, comp_left_team, comp_left_year, comp_left_year_single, side='left')
+comp_right_plot = pn.bind(render_selected_plot, comp_right_choice, comp_right_driver, comp_right_race, comp_right_team, comp_right_year, comp_right_year_single, side='right')
 
 
 # --- Layout Construction ---
@@ -1468,6 +1560,8 @@ tab_gain = create_tab_layout([gain_team_layout, gain_driver_layout, gain_race_la
 tab_lap = create_tab_layout([lap_race_layout, lap_team_layout, lap_driver_layout], lap_plot, "Köridők Eloszlása")
 
 # 7. Map Tab
+# Legend HTML is defined globally as LEGEND_HTML
+
 tab_map = pn.Row(
     pn.Column(
         pn.pane.Markdown("### 🗺️ Versenynaptár (Kattints a pontokra!)"),
@@ -1477,12 +1571,14 @@ tab_map = pn.Row(
         min_width=600
     ),
     pn.Column(
-        pn.pane.Markdown("### 🍩 Gumihasználat"),
-        map_race_layout, # Keep the dropdown too
-        pn.pane.Plotly(map_pie_plot, sizing_mode='stretch_width', height=450),
+        pn.pane.Markdown("### ℹ️ Info"),
+        map_year_layout, # Year selector instead of race selector
+        pn.pane.HTML(LEGEND_HTML, sizing_mode='stretch_width'),
+        pn.pane.Markdown("### 🍩 Kiválasztott Futam"),
+        pn.pane.Plotly(map_pie_plot, sizing_mode='stretch_width', height=300),
         css_classes=['card-box'],
         sizing_mode='fixed',
-        width=450,
+        width=300,
         margin=(0, 0, 0, 20)
     ),
     sizing_mode='stretch_both'
@@ -1493,7 +1589,7 @@ tab_compare = pn.Row(
     pn.Column(
         pn.pane.Markdown("### 👈 Bal Oldal"),
         pn.Column(
-            comp_left_choice_layout, comp_left_year_layout, comp_left_race_layout, comp_left_team_layout, comp_left_driver_layout,
+            comp_left_choice_layout, comp_left_year_layout, comp_left_year_single_layout, comp_left_race_layout, comp_left_team_layout, comp_left_driver_layout,
             css_classes=['widget-box']
         ),
         pn.Column(
@@ -1505,7 +1601,7 @@ tab_compare = pn.Row(
     pn.Column(
         pn.pane.Markdown("### 👉 Jobb Oldal"),
         pn.Column(
-            comp_right_choice_layout, comp_right_year_layout, comp_right_race_layout, comp_right_team_layout, comp_right_driver_layout,
+            comp_right_choice_layout, comp_right_year_layout, comp_right_year_single_layout, comp_right_race_layout, comp_right_team_layout, comp_right_driver_layout,
             css_classes=['widget-box']
         ),
         pn.Column(
