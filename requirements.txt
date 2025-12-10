@@ -1,7 +1,7 @@
 fastf1
-dash
 pandas
 plotly
 matplotlib
 openpyxl
-dash-bootstrap-components
+panel
+folium
